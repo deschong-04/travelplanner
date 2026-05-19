@@ -1,0 +1,6 @@
+{
+  "name": "Saigon Travel Master Planner",
+  "description": "A premium 4D3N travel planner for Saigon with live currency conversion and interactive master database.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
