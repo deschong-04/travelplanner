@@ -28,11 +28,15 @@ service cloud.firestore {
     function isValidTrip(data) {
       return data.plannerName is string 
         && data.plannerName.size() <= 200
+        && data.destination is string
+        && data.destination.size() <= 200
         && data.arrivalDate is string 
         && data.arrivalDate.size() <= 50
         && data.departureDate is string 
         && data.departureDate.size() <= 50
-        && (!('ownerId' in data) || (data.ownerId is string && data.ownerId.size() <= 128));
+        && (!('ownerId' in data) || (data.ownerId is string && data.ownerId.size() <= 128))
+        && (!('lat' in data) || data.lat is number)
+        && (!('lng' in data) || data.lng is number);
     }
 
     // Validation for Place Entity
@@ -66,10 +70,10 @@ service cloud.firestore {
 
     // Rule for trips
     match /trips/{tripId} {
-      allow read: if isValidId(tripId);
+      allow read, list: if isValidId(tripId);
       allow create: if isValidId(tripId) && isValidTrip(incoming());
       allow update: if isValidId(tripId) && isValidTrip(incoming()) && (
-        incoming().diff(existing()).affectedKeys().hasOnly(['plannerName', 'arrivalDate', 'departureDate', 'updatedAt', 'ownerId'])
+        incoming().diff(existing()).affectedKeys().hasOnly(['plannerName', 'destination', 'arrivalDate', 'departureDate', 'updatedAt', 'ownerId', 'lat', 'lng'])
       );
       allow delete: if isValidId(tripId);
 

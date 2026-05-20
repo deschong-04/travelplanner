@@ -53,8 +53,18 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { restrictToWindowEdges } from '@dnd-kit/modifiers';
 import { db, auth, googleProvider, handleFirestoreError, OperationType } from './firebase';
-import { onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, User as FirebaseUser } from 'firebase/auth';
-import { doc, collection, setDoc, deleteDoc, onSnapshot, writeBatch } from 'firebase/firestore';
+import { 
+  onAuthStateChanged, 
+  signInWithPopup, 
+  signInWithRedirect, 
+  getRedirectResult, 
+  signOut, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  updateProfile, 
+  User as FirebaseUser 
+} from 'firebase/auth';
+import { doc, collection, setDoc, deleteDoc, onSnapshot, writeBatch, query, where } from 'firebase/firestore';
 
 // --- Types & Constants ---
 
@@ -251,11 +261,13 @@ function MapRoutePolyline({ places }: { places: Place[] }) {
 function RealGoogleMap({ 
   places, 
   selectedId, 
-  onSelectId 
+  onSelectId,
+  tripCenter
 }: { 
   places: Place[]; 
   selectedId: string | null; 
   onSelectId: (id: string | null) => void; 
+  tripCenter?: { lat: number, lng: number };
 }) {
   const map = useMap();
   const validPlaces = useMemo(() => {
@@ -266,16 +278,20 @@ function RealGoogleMap({
     if (validPlaces.length > 0) {
       return { lat: validPlaces[0].lat!, lng: validPlaces[0].lng! };
     }
+    if (tripCenter) return tripCenter;
     return { lat: 10.7760, lng: 106.7000 };
-  }, [validPlaces]);
+  }, [validPlaces, tripCenter]);
 
   useEffect(() => {
     if (map && validPlaces.length > 0) {
       const bounds = new google.maps.LatLngBounds();
       validPlaces.forEach(p => bounds.extend({ lat: p.lat!, lng: p.lng! }));
       map.fitBounds(bounds, { top: 50, bottom: 50, left: 50, right: 50 });
+    } else if (map && validPlaces.length === 0 && tripCenter) {
+      map.setCenter(tripCenter);
+      map.setZoom(12);
     }
-  }, [map, validPlaces]);
+  }, [map, validPlaces, tripCenter]);
 
   return (
     <div className="w-full h-[450px] rounded-2xl overflow-hidden border border-slate-200 relative shadow-sm">
@@ -336,19 +352,27 @@ function RealGoogleMap({
 function MockInteractiveMap({
   places,
   selectedId,
-  onSelectId
+  onSelectId,
+  destinationLat = 10.7760,
+  destinationLng = 106.7000
 }: {
   places: Place[];
   selectedId: string | null;
   onSelectId: (id: string | null) => void;
+  destinationLat?: number;
+  destinationLng?: number;
 }) {
   const [activeSegment, setActiveSegment] = useState<number | null>(null);
 
-  // HCM Grid Bounds
-  const minLat = 10.75;
-  const maxLat = 10.81;
-  const minLng = 10.67;
-  const maxLng = 10.73;
+  // Dynamic grid center reference
+  const centerLat = places.length > 0 && places[0].lat !== undefined ? places[0].lat : destinationLat;
+  const centerLng = places.length > 0 && places[0].lng !== undefined ? places[0].lng : destinationLng;
+
+  // Dynamic Grid Bounds
+  const minLat = centerLat - 0.04;
+  const maxLat = centerLat + 0.04;
+  const minLng = centerLng - 0.04;
+  const maxLng = centerLng + 0.04;
 
   const points = useMemo(() => {
     return places.map((place, idx) => {
@@ -1265,20 +1289,40 @@ const customCollisionDetection: CollisionDetection = (args) => {
 // --- Main Application ---
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState<any>(() => {
-    const saved = localStorage.getItem('saigon_custom_user');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        return null;
-      }
-    }
-    return null;
-  });
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
 
-  // --- Hashing helper for Email Sync ---
+  // --- Real Authentication Form States ---
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authName, setAuthName] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  // --- Multi-Trip Plan & Switcher States ---
+  const [userTrips, setUserTrips] = useState<any[]>([]);
+  const [isCreateTripOpen, setIsCreateTripOpen] = useState(false);
+
+  // Trip Creation Form States
+  const [createTripName, setCreateTripName] = useState('');
+  const [createTripDestinationLabel, setCreateTripDestinationLabel] = useState('');
+  const [createTripLat, setCreateTripLat] = useState<number>(10.7760);
+  const [createTripLng, setCreateTripLng] = useState<number>(106.7000);
+  const [createTripArrival, setCreateTripArrival] = useState(() => new Date().toISOString().split('T')[0]);
+  const [createTripDeparture, setCreateTripDeparture] = useState(() => new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+  const [isCreatingTripLoading, setIsCreatingTripLoading] = useState(false);
+
+  // --- Active Destination Map details ---
+  const [destinationLabel, setDestinationLabel] = useState('Saigon');
+  const [destinationLat, setDestinationLat] = useState<number>(10.7760);
+  const [destinationLng, setDestinationLng] = useState<number>(106.7000);
+
+  // --- Universal Multi-currency converter details ---
+  const [baseCur, setBaseCur] = useState('SGD');
+  const [targetCur, setTargetCur] = useState('VND');
+  const [convRate, setConvRate] = useState<number>(18500);
+
+  // Hashing helper for guest sessions
   const getEmailHash = (email: string): string => {
     const clean = email.toLowerCase().trim();
     let hash = 0;
@@ -1414,24 +1458,30 @@ export default function App() {
       });
 
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        setCurrentUser(user);
-      } else {
-        const saved = localStorage.getItem('saigon_custom_user');
-        if (saved) {
-          try {
-            setCurrentUser(JSON.parse(saved));
-          } catch (e) {
-            setCurrentUser(null);
-          }
-        } else {
-          setCurrentUser(null);
-        }
-      }
+      setCurrentUser(user);
       setIsAuthLoading(false);
     });
     return () => unsubscribe();
   }, []);
+
+  // Subscribe to user's trips from Firebase Firestore in real-time
+  useEffect(() => {
+    if (!currentUser) {
+      setUserTrips([]);
+      return;
+    }
+    const q = query(collection(db, 'trips'), where('ownerId', '==', currentUser.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const tripsList: any[] = [];
+      snapshot.forEach((docSnap) => {
+        tripsList.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setUserTrips(tripsList);
+    }, (err) => {
+      console.error("Error subscribing to personal user trips:", err);
+    });
+    return () => unsubscribe();
+  }, [currentUser]);
 
   const handleLogin = async () => {
     setIsAuthLoading(true);
@@ -1578,8 +1628,8 @@ export default function App() {
   }, [places]);
 
   // Currency State
-  const [sgdInput, setSgdInput] = useState<string>('50');
-  const [vndInput, setVndInput] = useState<string>('200000');
+  const [baseInput, setBaseInput] = useState<string>('50');
+  const [targetInput, setTargetInput] = useState<string>('200000');
 
   // Sensors for DND
   const sensors = useSensors(
@@ -1616,15 +1666,29 @@ export default function App() {
     const unsubscribe = onSnapshot(tripRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        setPlannerName((prev: string) => prev !== data.plannerName ? data.plannerName : prev);
-        setArrivalDate((prev: string) => prev !== data.arrivalDate ? data.arrivalDate : prev);
-        setDepartureDate((prev: string) => prev !== data.departureDate ? data.departureDate : prev);
+        setPlannerName((prev: string) => prev !== data.plannerName ? (data.plannerName || '') : prev);
+        setArrivalDate((prev: string) => prev !== data.arrivalDate ? (data.arrivalDate || '') : prev);
+        setDepartureDate((prev: string) => prev !== data.departureDate ? (data.departureDate || '') : prev);
+        setDestinationLabel((prev: string) => prev !== data.destination ? (data.destination || 'Saigon') : prev);
+        
+        if (data.lat !== undefined) setDestinationLat(data.lat);
+        if (data.lng !== undefined) setDestinationLng(data.lng);
+        
+        if (data.baseCurrency !== undefined) setBaseCur(data.baseCurrency);
+        if (data.targetCurrency !== undefined) setTargetCur(data.targetCurrency);
+        if (data.conversionRate !== undefined) setConvRate(data.conversionRate);
       } else {
         try {
           setDoc(tripRef, {
             plannerName,
             arrivalDate,
             departureDate,
+            destination: destinationLabel,
+            lat: destinationLat,
+            lng: destinationLng,
+            baseCurrency: baseCur,
+            targetCurrency: targetCur,
+            conversionRate: convRate,
             ownerId: currentUser?.uid || 'guest',
             updatedAt: new Date().toISOString()
           });
@@ -1656,10 +1720,11 @@ export default function App() {
         fbPlaces.push(docSnap.data() as Place);
       });
 
-      if (fbPlaces.length > 0) {
-        setPlaces(fbPlaces);
-      } else {
-        // Safe first-time migration of local state to Cloud Firestore
+      // Always update state to match Firestore to avoid leaks from former trips
+      setPlaces(fbPlaces);
+
+      // Safe first-time migration of local state to Cloud Firestore ONLY for initial guests
+      if (fbPlaces.length === 0 && !currentUser && tripId.startsWith('SG-')) {
         const currentPlaces = placesRefVal.current;
         if (currentPlaces.length > 0) {
           const batch = writeBatch(db);
@@ -1691,6 +1756,12 @@ export default function App() {
           plannerName,
           arrivalDate,
           departureDate,
+          destination: destinationLabel,
+          lat: destinationLat,
+          lng: destinationLng,
+          baseCurrency: baseCur,
+          targetCurrency: targetCur,
+          conversionRate: convRate,
           ownerId: currentUser?.uid || 'guest',
           updatedAt: new Date().toISOString()
         });
@@ -1700,7 +1771,7 @@ export default function App() {
     }, 1000);
 
     return () => clearTimeout(timeout);
-  }, [plannerName, arrivalDate, departureDate, tripId]);
+  }, [plannerName, arrivalDate, departureDate, destinationLabel, destinationLat, destinationLng, baseCur, targetCur, convRate, tripId, currentUser]);
 
   // Handlers
   const addPlace = (selectedPlace?: google.maps.places.Place) => {
@@ -1914,17 +1985,17 @@ export default function App() {
   };
 
   // Currency Calculations
-  const sgdToVnd = (sgd: string) => {
-    const num = parseFloat(sgd);
+  const baseToTarget = (baseVal: string) => {
+    const num = parseFloat(baseVal);
     if (isNaN(num)) return '0';
-    return (num * VND_PER_SGD).toLocaleString();
+    return (num * convRate).toLocaleString(undefined, { maximumFractionDigits: 2 });
   };
 
-  const vndToSgd = (vnd: string) => {
-    const cleanVnd = vnd.replace(/,/g, '');
-    const num = parseFloat(cleanVnd);
+  const targetToBase = (targetVal: string) => {
+    const clean = targetVal.replace(/,/g, '');
+    const num = parseFloat(clean);
     if (isNaN(num)) return '0.00';
-    return (num / VND_PER_SGD).toFixed(2);
+    return (num / convRate).toFixed(2);
   };
 
   const filteredPlaces = useMemo(() => {
@@ -1964,17 +2035,60 @@ export default function App() {
           <div className="space-y-6 min-w-0">
             <header className="flex flex-col lg:flex-row lg:items-start justify-between gap-6 mb-10 border-b border-rose-50/10 pb-6">
               <div className="space-y-4 flex-1">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-ink rounded-xl flex items-center justify-center text-white shrink-0">
-                    <Calendar className="w-5 h-5" />
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4 justify-between lg:justify-start">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shrink-0 shadow-md shadow-indigo-100">
+                      <Calendar className="w-5 h-5" />
+                    </div>
+                    <div className="flex flex-col min-w-0 flex-1 sm:flex-initial">
+                      <input 
+                        type="text" 
+                        value={plannerName}
+                        onChange={(e) => setPlannerName(e.target.value)}
+                        className="text-lg font-extrabold tracking-tight bg-transparent border-none focus:ring-0 p-0 hover:bg-slate-100 transition-colors rounded px-2 -ml-2 text-slate-900"
+                        placeholder="Planner Name..."
+                      />
+                      <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest px-2 truncate">
+                        Loc: {destinationLabel || 'Saigon'}
+                      </span>
+                    </div>
                   </div>
-                  <input 
-                    type="text" 
-                    value={plannerName}
-                    onChange={(e) => setPlannerName(e.target.value)}
-                    className="text-xl font-bold tracking-tight bg-transparent border-none focus:ring-0 p-0 w-full hover:bg-slate-100 transition-colors rounded px-2 -ml-2"
-                    placeholder="Planner Name..."
-                  />
+
+                  {currentUser && (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <select
+                        value={tripId}
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          setTripId(id);
+                          localStorage.setItem('saigon_trip_id', id);
+                          const url = new URL(window.location.href);
+                          url.searchParams.set('tripId', id);
+                          window.history.pushState({}, '', url.toString());
+                        }}
+                        className="text-[11px] font-extrabold uppercase tracking-wider text-slate-700 bg-slate-100 hover:bg-slate-200 border-none rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-sm outline-none"
+                      >
+                        <option value={tripId}>{plannerName || 'Current Plan'}</option>
+                        {userTrips.filter(t => t.id !== tripId).map((trip) => (
+                          <option key={trip.id} value={trip.id}>
+                            {trip.plannerName || 'Unnamed Plan'} ({trip.destination || 'Custom'})
+                          </option>
+                        ))}
+                      </select>
+                      
+                      <button
+                        onClick={() => {
+                          setCreateTripName('');
+                          setCreateTripDestinationLabel('');
+                          setIsCreateTripOpen(true);
+                        }}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold p-1.5 rounded-xl text-xs flex items-center justify-center transition-all cursor-pointer shadow-sm hover:scale-[1.05]"
+                        title="Create New Trip Layout"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
                 </div>
                 
                 <div className="flex flex-wrap items-center gap-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
@@ -2702,12 +2816,15 @@ export default function App() {
                         places={filteredPlaces} 
                         selectedId={selectedMapPlaceId} 
                         onSelectId={setSelectedMapPlaceId} 
+                        tripCenter={{ lat: destinationLat, lng: destinationLng }}
                       />
                     ) : (
                       <MockInteractiveMap 
                         places={filteredPlaces} 
                         selectedId={selectedMapPlaceId} 
                         onSelectId={setSelectedMapPlaceId} 
+                        destinationLat={destinationLat}
+                        destinationLng={destinationLng}
                       />
                     )}
                   </div>
@@ -2719,59 +2836,98 @@ export default function App() {
           {/* Sidebar */}
           <aside className="space-y-6">
             {/* Currency Assistant */}
-            <div className="section-card p-6 gap-6 flex flex-col shadow-lg shadow-slate-200/50">
+            <div className="section-card p-6 gap-4 flex flex-col shadow-lg shadow-slate-200/50">
               <div>
-                <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest mb-1">Currency Assistant</h2>
-                <p className="text-[11px] text-slate-500">Mid-market: 1 SGD = 20,600 VND</p>
+                <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest mb-1">Currency Converter</h2>
+                <p className="text-[10px] text-slate-400 font-bold uppercase">Configure rate below:</p>
               </div>
 
-              <div className="space-y-5">
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Convert (SGD)</label>
+              {/* Dynamic Rate Configurator */}
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-2">
+                <div className="flex gap-2 items-center">
+                  <div className="flex-1 space-y-0.5">
+                    <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider">From</span>
+                    <input 
+                      type="text" 
+                      value={baseCur} 
+                      onChange={(e) => setBaseCur(e.target.value.toUpperCase().slice(0, 3))}
+                      className="w-full text-center text-xs font-bold p-1 bg-white border border-slate-200 rounded outline-none focus:border-indigo-500"
+                      maxLength={3}
+                    />
+                  </div>
+                  <div className="flex-1 space-y-0.5">
+                    <span className="text-[9px] font-extrabold text-[#10B981] uppercase tracking-wider">To</span>
+                    <input 
+                      type="text" 
+                      value={targetCur} 
+                      onChange={(e) => setTargetCur(e.target.value.toUpperCase().slice(0, 3))}
+                      className="w-full text-center text-xs font-bold p-1 bg-white border border-slate-200 rounded outline-none focus:border-emerald-500"
+                      maxLength={3}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-0.5">
+                  <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider block">Factor (1 {baseCur} = To {targetCur})</span>
+                  <input 
+                    type="number" 
+                    value={convRate} 
+                    onChange={(e) => setConvRate(parseFloat(e.target.value) || 1)}
+                    className="w-full text-center text-xs font-bold p-1 bg-white border border-slate-200 rounded outline-none focus:border-indigo-500"
+                    step="any"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Convert ({baseCur})</label>
                   <div className="relative">
                     <input 
                       type="number" 
-                      value={sgdInput}
-                      onChange={(e) => setSgdInput(e.target.value)}
-                      className="w-full p-3 pr-12 bg-slate-50 border border-border rounded-lg text-lg font-bold outline-none focus:border-ink/20"
+                      value={baseInput}
+                      onChange={(e) => setBaseInput(e.target.value)}
+                      className="w-full p-2.5 pr-12 bg-slate-50 border border-border rounded-lg text-sm font-bold outline-none focus:border-ink/20"
                     />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500">SGD</span>
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-500">{baseCur}</span>
                   </div>
                 </div>
 
-                <div className="text-center text-slate-300 text-2xl font-light">↓</div>
+                <div className="text-center text-slate-300 text-lg font-light leading-none">↓</div>
 
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">To (VND)</label>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">Calculated ({targetCur})</label>
                   <div className="relative">
                     <input 
                       type="text" 
                       readOnly
-                      value={sgdToVnd(sgdInput)}
-                      className="w-full p-3 pr-12 bg-[#ECFDF5] border border-[#A7F3D0] rounded-lg text-lg font-bold outline-none"
+                      value={baseToTarget(baseInput)}
+                      className="w-full p-2.5 pr-12 bg-[#ECFDF5] border border-[#A7F3D0] rounded-lg text-sm font-bold outline-none text-emerald-800"
                     />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500">VND</span>
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-emerald-600">{targetCur}</span>
                   </div>
                 </div>
               </div>
 
-              <div className="mt-4 pt-4 border-t border-border">
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block mb-2">QUICK VND TO SGD</label>
-                <div className="relative">
+              <div className="mt-2 pt-2 border-t border-border">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">QUICK {targetCur} TO {baseCur}</label>
+                <div className="relative border border-slate-200 rounded-lg overflow-hidden">
                   <input 
                     type="text"
-                    value={vndInput}
+                    value={targetInput}
                     onChange={(e) => {
                       const val = e.target.value.replace(/\D/g, '');
-                      setVndInput(val ? parseInt(val).toLocaleString() : '');
+                      setTargetInput(val ? parseInt(val).toLocaleString() : '');
                     }}
-                    className="w-full p-3 pr-12 bg-slate-50 border border-border rounded-lg text-lg font-bold outline-none focus:border-ink/20"
+                    className="w-full p-2.5 pr-12 bg-slate-50 outline-none focus:bg-white text-sm font-bold"
                   />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500">VND</span>
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-500">{targetCur}</span>
                 </div>
-                <div className="mt-2 text-right">
-                  <span className="text-xl font-bold font-mono tracking-tight text-ink">${vndToSgd(vndInput)}</span>
-                  <span className="text-[10px] font-bold text-slate-400 ml-1">SGD</span>
+                <div className="mt-2 text-right flex justify-between items-center bg-slate-50 p-2 rounded-lg border border-slate-100">
+                  <span className="text-[10px] font-bold text-slate-400">Equals:</span>
+                  <div>
+                    <span className="text-sm font-bold font-mono tracking-tight text-indigo-700">{targetToBase(targetInput)}</span>
+                    <span className="text-[10px] font-bold text-slate-400 ml-1">{baseCur}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2835,7 +2991,7 @@ export default function App() {
         </button>
       </div>
 
-      {/* Login / Sync Dialog Modal */}
+      {/* Login / Auth Dialog Modal */}
       <AnimatePresence>
         {isLoginModalOpen && (
           <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
@@ -2858,138 +3014,419 @@ export default function App() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Users className="w-4 h-4 text-indigo-600" />
-                  <h2 className="text-xs font-black text-slate-800 uppercase tracking-widest">Device Sync & Account</h2>
+                  <h2 className="text-xs font-black text-slate-800 uppercase tracking-widest">
+                    {authMode === 'login' ? 'Welcome Back Explorer' : 'Create Your Account'}
+                  </h2>
                 </div>
                 <button
-                  onClick={() => setIsLoginModalOpen(false)}
+                  onClick={() => {
+                    setIsLoginModalOpen(false);
+                    setAuthError(null);
+                  }}
                   className="text-slate-400 hover:text-slate-600 font-bold text-xl px-2 hover:bg-slate-50 rounded-lg cursor-pointer transition-colors"
                 >
                   ×
                 </button>
               </div>
 
-              <div className="space-y-4">
-                <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
-                  Keep your Saigon travel itinerary perfectly synchronized between your <strong>Macbook, iPhone, and team members</strong> in real-time.
-                </p>
+              {authError && (
+                <div className="bg-rose-50 text-rose-600 border border-rose-100 p-2.5 rounded-xl text-[10px] font-bold tracking-normal uppercase leading-normal">
+                  ⚠️ {authError}
+                </div>
+              )}
 
-                {/* Option 1: Quick Email-Based Instant Sync */}
-                <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[9px] uppercase font-bold tracking-widest text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full shrink-0">
-                      ★ Recommended for Mobile
-                    </span>
-                    <span className="text-[9px] font-black text-emerald-600 uppercase tracking-wider">Instant Sync</span>
-                  </div>
-                  
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                setIsAuthLoading(true);
+                setAuthError(null);
+                try {
+                  if (authMode === 'signup') {
+                    if (!authEmail || !authPassword) {
+                      setAuthError('Email and Password are required');
+                      setIsAuthLoading(false);
+                      return;
+                    }
+                    const res = await createUserWithEmailAndPassword(auth, authEmail, authPassword);
+                    if (authName && res.user) {
+                      await updateProfile(res.user, { displayName: authName });
+                    }
+                    setCurrentUser({ ...res.user, displayName: authName });
+                  } else {
+                    const res = await signInWithEmailAndPassword(auth, authEmail, authPassword);
+                    setCurrentUser(res.user);
+                  }
+                  setIsLoginModalOpen(false);
+                } catch (err: any) {
+                  setAuthError(err.message || 'Authentication failed');
+                } finally {
+                  setIsAuthLoading(false);
+                }
+              }} className="space-y-3">
+                {authMode === 'signup' && (
                   <div className="space-y-1">
-                    <h4 className="text-xs font-bold text-slate-800">1. Sync via Email (No Password)</h4>
-                    <p className="text-[10px] text-slate-400 leading-normal">
-                      Type your email address to immediately login and pair your Macbook & iPhone inside this shared workspace.
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <input
-                      type="email"
-                      placeholder="Enter your Gmail / Email..."
-                      value={loginEmail}
-                      onChange={(e) => setLoginEmail(e.target.value)}
-                      className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full shadow-sm"
-                    />
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Your Name</label>
                     <input
                       type="text"
-                      placeholder="My Nickname (Optional, e.g. Alex)"
-                      value={loginName}
-                      onChange={(e) => setLoginName(e.target.value)}
-                      className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full shadow-sm"
-                      maxLength={20}
+                      placeholder="My Nickname (e.g. Alex)"
+                      value={authName}
+                      onChange={(e) => setAuthName(e.target.value)}
+                      className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full shadow-sm"
+                      maxLength={30}
                     />
-                    <button
-                      onClick={() => {
-                        if (!loginEmail || !loginEmail.includes('@')) {
-                          alert('Please enter a valid email address.');
-                          return;
-                        }
-                        const hashRoomId = getEmailHash(loginEmail);
-                        const customUser = {
-                          uid: 'em-' + hashRoomId,
-                          email: loginEmail.trim().toLowerCase(),
-                          displayName: loginName.trim() || loginEmail.split('@')[0],
-                          photoURL: `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(loginEmail.trim().toLowerCase())}`,
-                          isCustom: true
-                        };
-                        localStorage.setItem('saigon_custom_user', JSON.stringify(customUser));
-                        setCurrentUser(customUser);
-                        setTripId(hashRoomId);
-                        localStorage.setItem('saigon_trip_id', hashRoomId);
-                        setIsLoginModalOpen(false);
-                      }}
-                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-2 rounded-xl transition-all cursor-pointer shadow-md shadow-indigo-600/10 active:scale-95"
-                    >
-                      Authenticate & Sync Devices
-                    </button>
+                  </div>
+                )}
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Email Address</label>
+                  <input
+                    type="email"
+                    placeholder="Enter email..."
+                    value={authEmail}
+                    onChange={(e) => setAuthEmail(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full shadow-sm"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Password</label>
+                  <input
+                    type="password"
+                    placeholder="Enter password..."
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full shadow-sm"
+                    required
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isAuthLoading}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-2.5 rounded-xl transition-all cursor-pointer shadow-md shadow-indigo-600/10 active:scale-95 flex items-center justify-center gap-2 mt-2"
+                >
+                  {isAuthLoading && <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                  <span>{authMode === 'login' ? 'Sign In Sync' : 'Register Account'}</span>
+                </button>
+              </form>
+
+              <div className="text-center">
+                <button
+                  onClick={() => {
+                    setAuthMode(authMode === 'login' ? 'signup' : 'login');
+                    setAuthError(null);
+                  }}
+                  className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold uppercase tracking-wider"
+                >
+                  {authMode === 'login' ? "Don't have an account? Sign Up" : "Already have an account? Sign In"}
+                </button>
+              </div>
+
+              <div className="flex items-center text-slate-300 gap-2 my-1">
+                <div className="h-[1px] bg-slate-200 flex-1" />
+                <span className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400 shrink-0">OR QUICK LINK</span>
+                <div className="h-[1px] bg-slate-200 flex-1" />
+              </div>
+
+              {/* standard Google federated auth */}
+              <button
+                onClick={async () => {
+                  setIsLoginModalOpen(false);
+                  setIsAuthLoading(true);
+                  const isSafari = /Safari/i.test(navigator.userAgent) && !/Chrome/i.test(navigator.userAgent);
+                  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+                  if (isSafari || isIOS) {
+                    try {
+                      await signInWithRedirect(auth, googleProvider);
+                    } catch (err) {
+                      console.error("Redirect login error:", err);
+                      setIsAuthLoading(false);
+                    }
+                    return;
+                  }
+
+                  try {
+                    await signInWithPopup(auth, googleProvider);
+                  } catch (err: any) {
+                    if (err.code === 'auth/popup-blocked' || err.code === 'auth/popup-closed-by-user' || err.message?.includes('popup')) {
+                      try {
+                        await signInWithRedirect(auth, googleProvider);
+                      } catch (redirectErr) {
+                        setIsAuthLoading(false);
+                      }
+                    } else {
+                      setIsAuthLoading(false);
+                    }
+                  }
+                }}
+                className="w-full flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-2 rounded-xl transition-all cursor-pointer border border-slate-200"
+              >
+                <svg className="w-3.5 h-3.5 text-slate-600" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12.24 10.285V13.4h6.887C18.2 15.614 15.645 18 12.24 18c-3.86 0-7-3.14-7-7s3.14-7 7-7c1.71 0 3.27.61 4.5 1.62l2.437-2.437C17.312 1.696 14.933 1 12.24 1 6.58 1 2 5.58 2 11.24s4.58 10.24 10.24 10.24c5.795 0 10.254-4.074 10.254-10.24 0-.695-.081-1.355-.224-1.955H12.24z"/>
+                </svg>
+                Sign In with Google
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* + Create New Trip Dialog Modal */}
+      <AnimatePresence>
+        {isCreateTripOpen && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsCreateTripOpen(false)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+            />
+            
+            {/* Modal Dialog Box */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="bg-white border border-slate-200/80 w-full max-w-sm rounded-[24px] shadow-2xl overflow-hidden relative z-50 p-5 md:p-6 space-y-4 flex flex-col text-slate-800"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-indigo-600" />
+                  <h2 className="text-xs font-black text-slate-800 uppercase tracking-widest">Create New Trip Planner</h2>
+                </div>
+                <button
+                  onClick={() => setIsCreateTripOpen(false)}
+                  className="text-slate-400 hover:text-slate-600 font-bold text-xl px-2 hover:bg-slate-50 rounded-lg cursor-pointer transition-colors"
+                >
+                  ×
+                </button>
+              </div>
+
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                if (!createTripName.trim()) return;
+                setIsCreatingTripLoading(true);
+
+                const newTripId = 'TRIP-' + Math.random().toString(36).substr(2, 6).toUpperCase();
+                try {
+                  const tripRef = doc(db, 'trips', newTripId);
+                  
+                  // Setup dynamic currency mappings based on destination text bias
+                  let targetCurrency = 'EUR';
+                  let baseCurrency = 'USD';
+                  let conversionRate = 0.92;
+                  
+                  const destLower = createTripDestinationLabel.toLowerCase();
+                  if (destLower.includes('vietnam') || destLower.includes('saigon') || destLower.includes('hanoi')) {
+                    targetCurrency = 'VND';
+                    baseCurrency = 'SGD';
+                    conversionRate = 18500;
+                  } else if (destLower.includes('japan') || destLower.includes('tokyo') || destLower.includes('kyoto')) {
+                    targetCurrency = 'JPY';
+                    baseCurrency = 'USD';
+                    conversionRate = 155.60;
+                  } else if (destLower.includes('singapore')) {
+                    targetCurrency = 'SGD';
+                    baseCurrency = 'USD';
+                    conversionRate = 1.34;
+                  } else if (destLower.includes('united kingdom') || destLower.includes('london')) {
+                    targetCurrency = 'GBP';
+                    baseCurrency = 'USD';
+                    conversionRate = 0.79;
+                  }
+
+                  await setDoc(tripRef, {
+                    plannerName: createTripName,
+                    destination: createTripDestinationLabel || 'Custom Destination',
+                    lat: createTripLat,
+                    lng: createTripLng,
+                    arrivalDate: createTripArrival,
+                    departureDate: createTripDeparture,
+                    baseCurrency,
+                    targetCurrency,
+                    conversionRate,
+                    ownerId: currentUser?.uid || 'guest',
+                    updatedAt: new Date().toISOString()
+                  });
+
+                  // Clear current list to load blank destination context cleanly
+                  setPlaces([]);
+
+                  // Select new trip
+                  setTripId(newTripId);
+                  localStorage.setItem('saigon_trip_id', newTripId);
+                  const url = new URL(window.location.href);
+                  url.searchParams.set('tripId', newTripId);
+                  window.history.pushState({}, '', url.toString());
+
+                  setIsCreateTripOpen(false);
+                } catch (err) {
+                  console.error("Failed to build new trip:", err);
+                } finally {
+                  setIsCreatingTripLoading(false);
+                }
+              }} className="space-y-3">
+                
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Plan Name</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Kyoto Cherry Blossom Trip"
+                    value={createTripName}
+                    onChange={(e) => setCreateTripName(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full shadow-sm"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Search City / Country</label>
+                  <CitySearchAutocomplete 
+                    onCitySelect={(city, lat, lng) => {
+                      setCreateTripDestinationLabel(city);
+                      setCreateTripLat(lat);
+                      setCreateTripLng(lng);
+                    }} 
+                  />
+                  {createTripDestinationLabel && (
+                    <div className="text-[9px] font-extrabold text-[#10B981] uppercase tracking-wide bg-emerald-50 border border-emerald-100 p-1.5 rounded-lg mt-1">
+                      Matched: {createTripDestinationLabel} ({createTripLat.toFixed(3)}, {createTripLng.toFixed(3)})
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Arrival</label>
+                    <input
+                      type="date"
+                      required
+                      value={createTripArrival}
+                      onChange={(e) => setCreateTripArrival(e.target.value)}
+                      className="bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 text-xs text-slate-800 font-medium focus:outline-none w-full"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Departure</label>
+                    <input
+                      type="date"
+                      required
+                      value={createTripDeparture}
+                      onChange={(e) => setCreateTripDeparture(e.target.value)}
+                      className="bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 text-xs text-slate-800 font-medium focus:outline-none w-full"
+                    />
                   </div>
                 </div>
 
-                <div className="flex items-center text-slate-300 gap-2">
-                  <div className="h-[1px] bg-slate-200 flex-1" />
-                  <span className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400 shrink-0">OR</span>
-                  <div className="h-[1px] bg-slate-200 flex-1" />
-                </div>
-
-                {/* Option 2: Standard Google Federated Auth */}
-                <div className="space-y-2">
-                  <h4 className="text-[11px] font-bold text-slate-700">2. Register via Google Account</h4>
-                  <p className="text-[10px] text-slate-400 leading-snug">
-                    Standard Google Sign-In redirect. Note: redirects are often restricted by secure browser cookies inside iframe previews.
-                  </p>
-                  <button
-                    onClick={async () => {
-                      setIsLoginModalOpen(false);
-                      setIsAuthLoading(true);
-                      // Safari on macOS and iOS blocks popup auth frames or closes popups immediately because of Intelligent Tracking Prevention.
-                      const isSafari = /Safari/i.test(navigator.userAgent) && !/Chrome/i.test(navigator.userAgent);
-                      const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-
-                      if (isSafari || isIOS) {
-                        try {
-                          await signInWithRedirect(auth, googleProvider);
-                        } catch (err) {
-                          console.error("Redirect login error:", err);
-                          setIsAuthLoading(false);
-                        }
-                        return;
-                      }
-
-                      try {
-                        await signInWithPopup(auth, googleProvider);
-                      } catch (err: any) {
-                        if (err.code === 'auth/popup-blocked' || err.code === 'auth/popup-closed-by-user' || err.message?.includes('popup')) {
-                          try {
-                            await signInWithRedirect(auth, googleProvider);
-                          } catch (redirectErr) {
-                            setIsAuthLoading(false);
-                          }
-                        } else {
-                          setIsAuthLoading(false);
-                        }
-                      }
-                    }}
-                    className="w-full flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-2 rounded-xl transition-all cursor-pointer border border-slate-200"
-                  >
-                    <svg className="w-3.5 h-3.5 text-slate-600" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M12.24 10.285V13.4h6.887C18.2 15.614 15.645 18 12.24 18c-3.86 0-7-3.14-7-7s3.14-7 7-7c1.71 0 3.27.61 4.5 1.62l2.437-2.437C17.312 1.696 14.933 1 12.24 1 6.58 1 2 5.58 2 11.24s4.58 10.24 10.24 10.24c5.795 0 10.254-4.074 10.254-10.24 0-.695-.081-1.355-.224-1.955H12.24z"/>
-                    </svg>
-                    Google Account Link
-                  </button>
-                </div>
-              </div>
+                <button
+                  type="submit"
+                  disabled={isCreatingTripLoading || !createTripDestinationLabel}
+                  className="w-full bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-indigo-700 text-white font-bold text-xs py-2.5 rounded-xl transition-all cursor-pointer shadow-md shadow-indigo-600/10 active:scale-95 flex items-center justify-center gap-2 mt-2"
+                >
+                  {isCreatingTripLoading && <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                  <span>Generate Travel Planner</span>
+                </button>
+              </form>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
     </div>
     </AppProvider>
+  );
+}
+
+// Separate Autocomplete helper for Cities in new trip modal
+function CitySearchAutocomplete({ onCitySelect }: { onCitySelect: (city: string, lat: number, lng: number) => void }) {
+  const [val, setVal] = useState('');
+  const [list, setList] = useState<google.maps.places.AutocompleteSuggestion[]>([]);
+  const [loading, setLoading] = useState(false);
+  const placesLib = useMapsLibrary('places');
+  const tokenRef = useRef<google.maps.places.AutocompleteSessionToken | null>(null);
+
+  useEffect(() => {
+    if (!placesLib || !val) {
+      setList([]);
+      return;
+    }
+    if (!tokenRef.current) {
+      tokenRef.current = new placesLib.AutocompleteSessionToken();
+    }
+
+    const fetchCities = async () => {
+      setLoading(true);
+      try {
+        const { suggestions } = await placesLib.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+          input: val,
+          sessionToken: tokenRef.current!
+        });
+        setList(suggestions);
+      } catch (err) {
+        console.error("City suggestion failed:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const t = setTimeout(fetchCities, 250);
+    return () => clearTimeout(t);
+  }, [placesLib, val]);
+
+  const selectHandler = async (s: google.maps.places.AutocompleteSuggestion) => {
+    if (!placesLib || !s.placePrediction) return;
+    const place = s.placePrediction.toPlace();
+    await place.fetchFields({ fields: ['displayName', 'location'] });
+    
+    if (place.location) {
+      onCitySelect(place.displayName || val, place.location.lat(), place.location.lng());
+    }
+    setVal('');
+    setList([]);
+    tokenRef.current = null;
+  };
+
+  return (
+    <div className="relative w-full">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+        <input
+          type="text"
+          value={val}
+          required={!val}
+          onChange={(e) => setVal(e.target.value)}
+          placeholder="e.g. Kyoto, Singapore, Paris..."
+          className="w-full pl-9 pr-8 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:border-indigo-500 shadow-inner"
+        />
+        {loading && (
+          <div className="absolute right-3 top-1/2 -translate-y-1/2">
+            <div className="w-3.5 h-3.5 border-2 border-slate-200 border-t-indigo-600 rounded-full animate-spin" />
+          </div>
+        )}
+      </div>
+
+      <AnimatePresence>
+        {list.length > 0 && (
+          <motion.ul
+            initial={{ opacity: 0, y: -5 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -5 }}
+            className="absolute z-50 left-0 right-0 mt-1 max-h-40 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg text-left"
+          >
+            {list.map((s, idx) => (
+              <li
+                key={idx}
+                onClick={() => selectHandler(s)}
+                className="px-3 py-2 text-[11px] hover:bg-slate-50 font-bold text-slate-700 cursor-pointer border-b border-slate-50 whitespace-nowrap overflow-hidden text-ellipsis"
+              >
+                📍 {s.placePrediction?.text?.text || s.placePrediction?.displayName?.text}
+              </li>
+            ))}
+          </motion.ul>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }

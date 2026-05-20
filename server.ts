@@ -23,15 +23,16 @@ const ai = new GoogleGenAI({
 // API route for generating suggestions
 app.post("/api/suggestions", async (req, res) => {
   try {
-    const { currentPlaces } = req.body;
+    const { currentPlaces, destination } = req.body;
+    const dest = destination || "Ho Chi Minh City (Saigon), Vietnam";
     
-    const prompt = `You are an expert travel guide for Ho Chi Minh City (Saigon), Vietnam. 
+    const prompt = `You are an expert travel guide for ${dest}. 
     Based on the following existing places in the user's travel master planner, generate 10 more unique and highly recommended places to visit.
     
     Existing places: ${JSON.stringify(currentPlaces)}
     
     Include a mix of hidden gems, popular spots, and varied categories like: Food, Fashion, Coffee, Spa, Sightseeing, and Nightlife.
-    Ensure districts are mainly D1, D3, D4, D5, D7, Binh Thanh, or Thu Duc.`;
+    Ensure districts or areas correspond to real, popular neighborhoods in ${dest}.`;
 
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",

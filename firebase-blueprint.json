@@ -6,12 +6,15 @@
       "type": "object",
       "properties": {
         "plannerName": { "type": "string" },
+        "destination": { "type": "string" },
         "arrivalDate": { "type": "string" },
         "departureDate": { "type": "string" },
         "updatedAt": { "type": "string" },
-        "ownerId": { "type": "string" }
+        "ownerId": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" }
       },
-      "required": ["plannerName", "arrivalDate", "departureDate"]
+      "required": ["plannerName", "destination", "arrivalDate", "departureDate"]
     },
     "Place": {
       "title": "Itinerary Stop",
