@@ -31,7 +31,8 @@ import {
   useDraggable,
   useDroppable,
   DragOverlay,
-  defaultDropAnimationSideEffects
+  defaultDropAnimationSideEffects,
+  CollisionDetection
 } from '@dnd-kit/core';
 import {
   arrayMove,
@@ -159,6 +160,17 @@ const API_KEY =
   '';
 
 const hasValidKey = Boolean(API_KEY) && API_KEY !== 'YOUR_API_KEY';
+
+function AppProvider({ children }: { children: React.ReactNode }) {
+  if (hasValidKey) {
+    return (
+      <APIProvider apiKey={API_KEY} version="weekly">
+        {children}
+      </APIProvider>
+    );
+  }
+  return <>{children}</>;
+}
 
 function PlaceAutocomplete({ onPlaceSelect }: { onPlaceSelect: (place: google.maps.places.Place) => void }) {
   const [inputValue, setInputValue] = useState('');
@@ -516,6 +528,80 @@ const DistrictBadge = ({ district }: { district: District }) => (
   <Badge className="bg-[#DBEAFE] text-[#1E40AF]">{district}</Badge>
 );
 
+// --- Custom Collision Detection for Horizontal Tabs & Extra Hotspot Response ---
+const customCollisionDetection: CollisionDetection = (args) => {
+  const { active, droppableContainers, droppableRects, pointerCoordinates } = args;
+
+  // Find all tab droppables that start with 'tab-'
+  const tabContainers = droppableContainers.filter(
+    (container) => container.id.toString().startsWith('tab-')
+  );
+
+  const activeRect = active.rect.current.translated;
+
+  if (activeRect && tabContainers.length > 0) {
+    // Define the "leftmost hotspot" of the dragged item
+    // It starts at the left edge and extends 100px (or the whole item width if it's smaller)
+    const hotspotWidth = Math.min(100, activeRect.width);
+    const hotspotLeft = activeRect.left;
+    const hotspotRight = activeRect.left + hotspotWidth;
+
+    let bestTabId = null;
+    let maxIntersectionArea = 0;
+
+    for (const container of tabContainers) {
+      const rect = droppableRects.get(container.id);
+      if (!rect) continue;
+
+      // Vertical leniency padding of 25px for better UX when hovering near tab borders
+      const paddedTabTop = rect.top - 25;
+      const paddedTabBottom = rect.bottom + 25;
+
+      // Check overlap between the active item's leftmost hotspot and the padded tab rect
+      const overlapLeft = Math.max(hotspotLeft, rect.left);
+      const overlapRight = Math.min(hotspotRight, rect.right);
+      const overlapTop = Math.max(activeRect.top, paddedTabTop);
+      const overlapBottom = Math.min(activeRect.bottom, paddedTabBottom);
+
+      if (overlapLeft < overlapRight && overlapTop < overlapBottom) {
+        const area = (overlapRight - overlapLeft) * (overlapBottom - overlapTop);
+        if (area > maxIntersectionArea) {
+          maxIntersectionArea = area;
+          bestTabId = container.id;
+        }
+      }
+    }
+
+    // Also consider pointer coordinates as an immediate priority trigger when pointer is over the tab
+    if (pointerCoordinates) {
+      for (const container of tabContainers) {
+        const rect = droppableRects.get(container.id);
+        if (!rect) continue;
+
+        const paddedTabTop = rect.top - 25;
+        const paddedTabBottom = rect.bottom + 25;
+
+        const isPointerInside = 
+          pointerCoordinates.x >= rect.left && 
+          pointerCoordinates.x <= rect.right && 
+          pointerCoordinates.y >= paddedTabTop && 
+          pointerCoordinates.y <= paddedTabBottom;
+
+        if (isPointerInside) {
+          return [{ id: container.id }];
+        }
+      }
+    }
+
+    if (bestTabId) {
+      return [{ id: bestTabId }];
+    }
+  }
+
+  // Fallback to standard closestCenter detection for non-tab items or when not overlapping
+  return closestCenter(args);
+};
+
 // --- Main Application ---
 
 export default function App() {
@@ -785,57 +871,12 @@ export default function App() {
     data: { type: 'checklist', day: activeTab }
   });
 
-  if (!hasValidKey) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-bg p-6 text-center font-sans">
-        <div className="max-w-md w-full bg-white p-8 rounded-3xl shadow-2xl border border-border space-y-6">
-          <div className="w-16 h-16 bg-ink text-white rounded-2xl flex items-center justify-center mx-auto shadow-lg">
-            <MapIcon className="w-8 h-8" />
-          </div>
-          <div className="space-y-2">
-            <h2 className="text-2xl font-black tracking-tight text-slate-900">Google Maps Required</h2>
-            <p className="text-slate-500 text-sm leading-relaxed">To use smart place recognition and addresses, please add your Google Maps API Key.</p>
-          </div>
-          
-          <div className="text-left bg-slate-50 p-4 rounded-xl space-y-4 border border-slate-100">
-            <div className="space-y-1">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Step 1</p>
-              <a 
-                href="https://console.cloud.google.com/google/maps-apis/start?utm_campaign=gmp-code-assist-ais" 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="text-sm font-bold text-ink underline decoration-ink/20 underline-offset-4 hover:decoration-ink"
-              >
-                Get API Key from Google Cloud
-              </a>
-            </div>
-            <div className="space-y-2">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Step 2</p>
-              <ul className="text-[13px] text-slate-600 space-y-2 leading-tight">
-                <li className="flex items-start gap-2">
-                  <span className="w-4 h-4 bg-slate-200 text-slate-500 text-[10px] flex items-center justify-center rounded-full shrink-0 mt-0.5">1</span>
-                  <span>Click Gear icon (top-right) → <strong>Secrets</strong></span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="w-4 h-4 bg-slate-200 text-slate-500 text-[10px] flex items-center justify-center rounded-full shrink-0 mt-0.5">2</span>
-                  <span>Add <code>GOOGLE_MAPS_PLATFORM_KEY</code></span>
-                </li>
-              </ul>
-            </div>
-          </div>
-          
-          <p className="text-[11px] text-slate-400 italic">The app will rebuild automatically after you save the key.</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <APIProvider apiKey={API_KEY} version="weekly">
+    <AppProvider>
       <div className="min-h-screen bg-bg text-ink font-sans selection:bg-slate-200">
       <DndContext 
         sensors={sensors}
-        collisionDetection={closestCenter}
+        collisionDetection={customCollisionDetection}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
@@ -917,10 +958,27 @@ export default function App() {
                             <Search className="w-3.5 h-3.5" />
                             Smart Place Search
                           </p>
-                          <PlaceAutocomplete onPlaceSelect={(p) => {
-                            addPlace(p);
-                            setIsManualMode(false);
-                          }} />
+                           {hasValidKey ? (
+                            <PlaceAutocomplete onPlaceSelect={(p) => {
+                              addPlace(p);
+                              setIsManualMode(false);
+                            }} />
+                          ) : (
+                            <div className="bg-slate-100/70 p-5 rounded-2xl border border-slate-200/50 space-y-3">
+                              <div className="flex items-center gap-2 text-slate-600 font-bold text-xs">
+                                <MapIcon className="w-4 h-4 text-slate-400" />
+                                Google Maps Autocomplete (Offline Mode)
+                              </div>
+                              <p className="text-[11.5px] text-slate-500 leading-relaxed">
+                                The app is running offline or is deployed without a Maps API key. You can still easily add locations using <strong className="text-indigo-600 uppercase font-extrabold font-sans">"Or Add Manually"</strong> or extract curated Saigon spots with <strong className="text-indigo-600 uppercase font-extrabold font-sans">"View Suggested"</strong>!
+                              </p>
+                              <div className="pt-1.5">
+                                <span className="text-[9.5px] font-bold tracking-wider text-indigo-600 uppercase bg-indigo-50/50 px-3 py-1 rounded-full border border-indigo-100 block sm:inline-block">
+                                  💡 Setup: Configure VITE_GOOGLE_MAPS_PLATFORM_KEY on Netlify to activate search
+                                </span>
+                              </div>
+                            </div>
+                          )}
                         </div>
 
                         <div className="flex flex-wrap items-center justify-center gap-4 py-1">
@@ -1356,6 +1414,6 @@ export default function App() {
         </button>
       </div>
     </div>
-    </APIProvider>
+    </AppProvider>
   );
 }
