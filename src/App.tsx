@@ -1265,8 +1265,34 @@ const customCollisionDetection: CollisionDetection = (args) => {
 // --- Main Application ---
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [currentUser, setCurrentUser] = useState<any>(() => {
+    const saved = localStorage.getItem('saigon_custom_user');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return null;
+      }
+    }
+    return null;
+  });
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+
+  // --- Hashing helper for Email Sync ---
+  const getEmailHash = (email: string): string => {
+    const clean = email.toLowerCase().trim();
+    let hash = 0;
+    for (let i = 0; i < clean.length; i++) {
+      hash = (hash << 5) - hash + clean.charCodeAt(i);
+      hash |= 0; // Convert to 32bit integer
+    }
+    const code = Math.abs(hash).toString(36).toUpperCase().substring(0, 5);
+    return 'SG-' + code;
+  };
+
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginName, setLoginName] = useState('');
 
   // --- Collaborative Trip ID & Presence State ---
   const [tripId, setTripId] = useState<string>(() => {
@@ -1388,7 +1414,20 @@ export default function App() {
       });
 
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
+      if (user) {
+        setCurrentUser(user);
+      } else {
+        const saved = localStorage.getItem('saigon_custom_user');
+        if (saved) {
+          try {
+            setCurrentUser(JSON.parse(saved));
+          } catch (e) {
+            setCurrentUser(null);
+          }
+        } else {
+          setCurrentUser(null);
+        }
+      }
       setIsAuthLoading(false);
     });
     return () => unsubscribe();
@@ -1600,6 +1639,12 @@ export default function App() {
     return () => unsubscribe();
   }, [tripId]);
 
+  // Keep the latest copy of places to prevent stale closure in subscription callback
+  const placesRefVal = useRef(places);
+  useEffect(() => {
+    placesRefVal.current = places;
+  }, [places]);
+
   // Cloud Sync: Subscribe to Place Documents inside the shared trip subcollection
   useEffect(() => {
     if (!tripId) return;
@@ -1607,17 +1652,18 @@ export default function App() {
     const placesRef = collection(db, 'trips', tripId, 'places');
     const unsubscribe = onSnapshot(placesRef, async (querySnap) => {
       const fbPlaces: Place[] = [];
-      querySnap.forEach((doc) => {
-        fbPlaces.push(doc.data() as Place);
+      querySnap.forEach((docSnap) => {
+        fbPlaces.push(docSnap.data() as Place);
       });
 
       if (fbPlaces.length > 0) {
         setPlaces(fbPlaces);
       } else {
         // Safe first-time migration of local state to Cloud Firestore
-        if (places.length > 0) {
+        const currentPlaces = placesRefVal.current;
+        if (currentPlaces.length > 0) {
           const batch = writeBatch(db);
-          places.forEach((p) => {
+          currentPlaces.forEach((p) => {
             const docRef = doc(db, 'trips', tripId, 'places', p.id);
             batch.set(docRef, p);
           });
@@ -1991,6 +2037,8 @@ export default function App() {
                     <button
                       onClick={async () => {
                         try {
+                          localStorage.removeItem('saigon_custom_user');
+                          setCurrentUser(null);
                           await signOut(auth);
                         } catch (err) {
                           console.error("Signout error:", err);
@@ -2004,7 +2052,7 @@ export default function App() {
                 ) : (
                   <div className="flex items-center gap-3">
                     <button
-                      onClick={handleLogin}
+                      onClick={() => setIsLoginModalOpen(true)}
                       className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold font-sans text-xs px-4 py-2.5 rounded-xl shadow-md cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98]"
                     >
                       <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
@@ -2786,6 +2834,161 @@ export default function App() {
           <span className="text-[10px] font-bold text-ink uppercase tracking-tighter">Money</span>
         </button>
       </div>
+
+      {/* Login / Sync Dialog Modal */}
+      <AnimatePresence>
+        {isLoginModalOpen && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsLoginModalOpen(false)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+            />
+            
+            {/* Modal Dialog Box */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="bg-white border border-slate-200/80 w-full max-w-sm rounded-[24px] shadow-2xl overflow-hidden relative z-50 p-5 md:p-6 space-y-4 flex flex-col text-slate-800"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Users className="w-4 h-4 text-indigo-600" />
+                  <h2 className="text-xs font-black text-slate-800 uppercase tracking-widest">Device Sync & Account</h2>
+                </div>
+                <button
+                  onClick={() => setIsLoginModalOpen(false)}
+                  className="text-slate-400 hover:text-slate-600 font-bold text-xl px-2 hover:bg-slate-50 rounded-lg cursor-pointer transition-colors"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
+                  Keep your Saigon travel itinerary perfectly synchronized between your <strong>Macbook, iPhone, and team members</strong> in real-time.
+                </p>
+
+                {/* Option 1: Quick Email-Based Instant Sync */}
+                <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] uppercase font-bold tracking-widest text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full shrink-0">
+                      ★ Recommended for Mobile
+                    </span>
+                    <span className="text-[9px] font-black text-emerald-600 uppercase tracking-wider">Instant Sync</span>
+                  </div>
+                  
+                  <div className="space-y-1">
+                    <h4 className="text-xs font-bold text-slate-800">1. Sync via Email (No Password)</h4>
+                    <p className="text-[10px] text-slate-400 leading-normal">
+                      Type your email address to immediately login and pair your Macbook & iPhone inside this shared workspace.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <input
+                      type="email"
+                      placeholder="Enter your Gmail / Email..."
+                      value={loginEmail}
+                      onChange={(e) => setLoginEmail(e.target.value)}
+                      className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full shadow-sm"
+                    />
+                    <input
+                      type="text"
+                      placeholder="My Nickname (Optional, e.g. Alex)"
+                      value={loginName}
+                      onChange={(e) => setLoginName(e.target.value)}
+                      className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full shadow-sm"
+                      maxLength={20}
+                    />
+                    <button
+                      onClick={() => {
+                        if (!loginEmail || !loginEmail.includes('@')) {
+                          alert('Please enter a valid email address.');
+                          return;
+                        }
+                        const hashRoomId = getEmailHash(loginEmail);
+                        const customUser = {
+                          uid: 'em-' + hashRoomId,
+                          email: loginEmail.trim().toLowerCase(),
+                          displayName: loginName.trim() || loginEmail.split('@')[0],
+                          photoURL: `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(loginEmail.trim().toLowerCase())}`,
+                          isCustom: true
+                        };
+                        localStorage.setItem('saigon_custom_user', JSON.stringify(customUser));
+                        setCurrentUser(customUser);
+                        setTripId(hashRoomId);
+                        localStorage.setItem('saigon_trip_id', hashRoomId);
+                        setIsLoginModalOpen(false);
+                      }}
+                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-2 rounded-xl transition-all cursor-pointer shadow-md shadow-indigo-600/10 active:scale-95"
+                    >
+                      Authenticate & Sync Devices
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center text-slate-300 gap-2">
+                  <div className="h-[1px] bg-slate-200 flex-1" />
+                  <span className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400 shrink-0">OR</span>
+                  <div className="h-[1px] bg-slate-200 flex-1" />
+                </div>
+
+                {/* Option 2: Standard Google Federated Auth */}
+                <div className="space-y-2">
+                  <h4 className="text-[11px] font-bold text-slate-700">2. Register via Google Account</h4>
+                  <p className="text-[10px] text-slate-400 leading-snug">
+                    Standard Google Sign-In redirect. Note: redirects are often restricted by secure browser cookies inside iframe previews.
+                  </p>
+                  <button
+                    onClick={async () => {
+                      setIsLoginModalOpen(false);
+                      setIsAuthLoading(true);
+                      // Safari on macOS and iOS blocks popup auth frames or closes popups immediately because of Intelligent Tracking Prevention.
+                      const isSafari = /Safari/i.test(navigator.userAgent) && !/Chrome/i.test(navigator.userAgent);
+                      const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+                      if (isSafari || isIOS) {
+                        try {
+                          await signInWithRedirect(auth, googleProvider);
+                        } catch (err) {
+                          console.error("Redirect login error:", err);
+                          setIsAuthLoading(false);
+                        }
+                        return;
+                      }
+
+                      try {
+                        await signInWithPopup(auth, googleProvider);
+                      } catch (err: any) {
+                        if (err.code === 'auth/popup-blocked' || err.code === 'auth/popup-closed-by-user' || err.message?.includes('popup')) {
+                          try {
+                            await signInWithRedirect(auth, googleProvider);
+                          } catch (redirectErr) {
+                            setIsAuthLoading(false);
+                          }
+                        } else {
+                          setIsAuthLoading(false);
+                        }
+                      }
+                    }}
+                    className="w-full flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-2 rounded-xl transition-all cursor-pointer border border-slate-200"
+                  >
+                    <svg className="w-3.5 h-3.5 text-slate-600" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12.24 10.285V13.4h6.887C18.2 15.614 15.645 18 12.24 18c-3.86 0-7-3.14-7-7s3.14-7 7-7c1.71 0 3.27.61 4.5 1.62l2.437-2.437C17.312 1.696 14.933 1 12.24 1 6.58 1 2 5.58 2 11.24s4.58 10.24 10.24 10.24c5.795 0 10.254-4.074 10.254-10.24 0-.695-.081-1.355-.224-1.955H12.24z"/>
+                    </svg>
+                    Google Account Link
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
     </AppProvider>
   );
