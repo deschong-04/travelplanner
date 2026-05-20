@@ -1,0 +1,45 @@
+{
+  "entities": {
+    "Trip": {
+      "title": "Trip Info",
+      "description": "Information about the planner's overview",
+      "type": "object",
+      "properties": {
+        "plannerName": { "type": "string" },
+        "arrivalDate": { "type": "string" },
+        "departureDate": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "ownerId": { "type": "string" }
+      },
+      "required": ["plannerName", "arrivalDate", "departureDate", "ownerId"]
+    },
+    "Place": {
+      "title": "Itinerary Stop",
+      "description": "A scheduled or database place on the travel router",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "district": { "type": "string" },
+        "category": { "type": "string" },
+        "address": { "type": "string" },
+        "day": { "type": "string" },
+        "time": { "type": "string" },
+        "expanded": { "type": "boolean" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" }
+      },
+      "required": ["id", "name", "district", "category"]
+    }
+  },
+  "firestore": {
+    "/trips/{userId}": {
+      "schema": "Trip",
+      "description": "Stores user trip metadata"
+    },
+    "/trips/{userId}/places/{placeId}": {
+      "schema": "Place",
+      "description": "Stores places/stops for the user's trip"
+    }
+  }
+}

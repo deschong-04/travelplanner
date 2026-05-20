@@ -1,0 +1,80 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety Net default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Is current user authenticated and accessing their own path
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // Helper functions
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Validation for Trip Entity
+    function isValidTrip(data) {
+      return data.plannerName is string 
+        && data.plannerName.size() <= 200
+        && data.arrivalDate is string 
+        && data.arrivalDate.size() <= 50
+        && data.departureDate is string 
+        && data.departureDate.size() <= 50
+        && data.ownerId is string
+        && data.ownerId == request.auth.uid;
+    }
+
+    // Validation for Place Entity
+    function isValidPlace(data) {
+      return data.id is string
+        && data.id.size() <= 128
+        && data.name is string 
+        && data.name.size() <= 300
+        && data.district is string 
+        && data.district.size() <= 100
+        && data.category is string 
+        && data.category.size() <= 100
+        && (!('address' in data) || (data.address is string && data.address.size() <= 500))
+        && (!('day' in data) || (data.day is string && data.day.size() <= 100))
+        && (!('time' in data) || (data.time is string && data.time.size() <= 100))
+        && (!('expanded' in data) || data.expanded is bool)
+        && (!('lat' in data) || data.lat is number)
+        && (!('lng' in data) || data.lng is number);
+    }
+
+    // Rule for trips
+    match /trips/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidTrip(incoming());
+      allow update: if isOwner(userId) && isValidTrip(incoming()) && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['plannerName', 'arrivalDate', 'departureDate', 'updatedAt', 'ownerId'])
+      );
+      allow delete: if isOwner(userId);
+
+      // Rule for subcollection places
+      match /places/{placeId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(placeId) && isValidPlace(incoming());
+        allow update: if isOwner(userId) && isValidId(placeId) && isValidPlace(incoming());
+        allow delete: if isOwner(userId) && isValidId(placeId);
+      }
+    }
+  }
+}

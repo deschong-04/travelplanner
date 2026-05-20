@@ -18,7 +18,8 @@ import {
   ExternalLink,
   Compass,
   Navigation,
-  Car
+  Car,
+  MoreHorizontal
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { APIProvider, useMapsLibrary, Map, AdvancedMarker, Pin, InfoWindow, useMap } from '@vis.gl/react-google-maps';
@@ -46,6 +47,9 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { restrictToWindowEdges } from '@dnd-kit/modifiers';
+import { db, auth, googleProvider, handleFirestoreError, OperationType } from './firebase';
+import { onAuthStateChanged, signInWithPopup, signOut, User as FirebaseUser } from 'firebase/auth';
+import { doc, collection, setDoc, deleteDoc, onSnapshot, writeBatch } from 'firebase/firestore';
 
 // --- Types & Constants ---
 
@@ -92,6 +96,39 @@ function getDayList(arrival: string, departure: string): string[] {
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
   
   return Array.from({ length: diffDays }, (_, i) => `Day ${i + 1}`);
+}
+
+function getFormattedDayLabel(dayStr: string, arrivalDateStr: string): string {
+  const match = dayStr.match(/\d+/);
+  if (!match) return dayStr;
+  const dayIndex = parseInt(match[0]) - 1;
+  const baseDate = new Date(arrivalDateStr + 'T00:00:00');
+  if (isNaN(baseDate.getTime())) return dayStr;
+  
+  const targetDate = new Date(baseDate);
+  targetDate.setDate(baseDate.getDate() + dayIndex);
+  
+  const weekday = targetDate.toLocaleDateString('en-US', { weekday: 'long' });
+  const day = targetDate.getDate();
+  const month = targetDate.toLocaleDateString('en-US', { month: 'long' });
+  
+  let suffix = 'th';
+  if (day === 1 || day === 21 || day === 31) suffix = 'st';
+  else if (day === 2 || day === 22) suffix = 'nd';
+  else if (day === 3 || day === 23) suffix = 'rd';
+  
+  return `${weekday}, ${day}${suffix} ${month}`;
+}
+
+function getFormattedDateRange(arrivalDateStr: string, departureDateStr: string): string {
+  const start = new Date(arrivalDateStr + 'T00:00:00');
+  const end = new Date(departureDateStr + 'T00:00:00');
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) return '';
+  const startDay = start.getDate();
+  const startMonth = start.getMonth() + 1;
+  const endDay = end.getDate();
+  const endMonth = end.getMonth() + 1;
+  return `${startDay}/${startMonth} - ${endDay}/${endMonth}`;
 }
 
 const INITIAL_PLACES: Place[] = [
@@ -930,6 +967,198 @@ function DroppableTab({ day, activeTab, setActiveTab }: DroppableTabProps) {
   );
 }
 
+interface ItineraryAccordionRowProps {
+  key?: React.Key;
+  day: Day;
+  isExpanded: boolean;
+  onToggle: () => void;
+  arrivalDate: string;
+  places: Place[];
+  updatePlaceTime: (id: string, time: string) => void;
+  deletePlace: (id: string) => void;
+  toggleExpand: (id: string) => void;
+  onClearDay: (day: Day) => void;
+}
+
+function ItineraryAccordionRow({
+  day,
+  isExpanded,
+  onToggle,
+  arrivalDate,
+  places,
+  updatePlaceTime,
+  deletePlace,
+  toggleExpand,
+  onClearDay
+}: ItineraryAccordionRowProps) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `tab-${day}`,
+    data: { type: 'tab', day }
+  });
+
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setIsMenuOpen(false);
+      }
+    }
+    if (isMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isMenuOpen]);
+
+  const dayPlaces = useMemo(() => {
+    return places
+      .filter(p => p.day === day)
+      .sort((a, b) => {
+        if (!a.time) return 1;
+        if (!b.time) return -1;
+        return a.time.localeCompare(b.time);
+      });
+  }, [places, day]);
+
+  const formattedLabel = getFormattedDayLabel(day, arrivalDate);
+
+  const stopsSummary = useMemo(() => {
+    if (dayPlaces.length === 0) return 'No stops scheduled yet';
+    return dayPlaces.map(p => p.name).join(' • ');
+  }, [dayPlaces]);
+
+  return (
+    <div 
+      ref={setNodeRef}
+      className={`border-b border-slate-100 pb-5 pt-5 transition-all duration-200 ${
+        isOver ? 'bg-indigo-50/20 px-3 rounded-2xl border-dashed border-2 border-indigo-200' : ''
+      }`}
+    >
+      <div 
+        onClick={onToggle}
+        className="flex items-start justify-between gap-4 cursor-pointer group py-1 select-none"
+      >
+        <div className="flex items-start gap-4 min-w-0 flex-1">
+          <div className="pt-1.5 text-slate-400 group-hover:text-slate-800 transition-colors shrink-0">
+            <motion.div
+              animate={{ rotate: isExpanded ? 90 : 0 }}
+              transition={{ duration: 0.2 }}
+            >
+              <ChevronRight className="w-5 h-5 stroke-[2.5]" />
+            </motion.div>
+          </div>
+
+          <div className="min-w-0">
+            <h3 className="text-[17px] sm:text-lg font-black text-slate-900 tracking-tight leading-snug">
+              {formattedLabel}
+            </h3>
+            
+            {!isExpanded && (
+              <p className="text-slate-500 font-medium text-xs sm:text-[13px] tracking-wide mt-1 truncate max-w-full leading-relaxed">
+                {stopsSummary}
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="relative shrink-0 flex items-center gap-2 pt-0.5" onClick={(e) => e.stopPropagation()}>
+          {dayPlaces.length > 0 && (
+            <span className="bg-slate-100 text-slate-600 border border-slate-200 text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center scale-90">
+              {dayPlaces.length}
+            </span>
+          )}
+          <button
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
+            className="p-1 px-2 text-slate-400 hover:text-slate-700 hover:bg-slate-150/60 rounded-lg transition-colors cursor-pointer"
+          >
+            <MoreHorizontal className="w-5 h-5" />
+          </button>
+
+          <AnimatePresence>
+            {isMenuOpen && (
+              <motion.div
+                ref={menuRef}
+                initial={{ opacity: 0, scale: 0.95, y: -5 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: -5 }}
+                className="absolute right-0 top-full mt-2 w-44 bg-white rounded-xl shadow-xl border border-slate-150 py-1.5 z-40"
+              >
+                <div className="px-3 py-1 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 mb-1">
+                  Day Actions
+                </div>
+                <button
+                  onClick={() => {
+                    onToggle();
+                    setIsMenuOpen(false);
+                  }}
+                  className="w-full text-left px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                >
+                  {isExpanded ? <ChevronUp className="w-3.5 h-3.5 text-slate-400" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-400" />}
+                  <span>{isExpanded ? 'Collapse Day' : 'Expand Day'}</span>
+                </button>
+                <button
+                  onClick={() => {
+                    onClearDay(day);
+                    setIsMenuOpen(false);
+                  }}
+                  disabled={dayPlaces.length === 0}
+                  className="w-full text-left px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50 disabled:hover:bg-transparent flex items-center gap-2"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                  <span>Clear All Stops</span>
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+
+      <AnimatePresence initial={false}>
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="pl-6 sm:pl-9 pr-1 pt-5 pb-2 min-h-0">
+              <SortableContext 
+                items={dayPlaces.map(p => `itinerary-${p.id}`)}
+                strategy={verticalListSortingStrategy}
+              >
+                {dayPlaces.length > 0 ? (
+                  <div className="space-y-3.5">
+                    {dayPlaces.map((place) => (
+                      <DraggableItineraryItem 
+                        key={place.id}
+                        place={place}
+                        updatePlaceTime={updatePlaceTime}
+                        deletePlace={deletePlace}
+                        toggleExpand={toggleExpand}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="py-8 px-4 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 text-center gap-2 bg-slate-50/50">
+                    <MapPin className="w-7 h-7 text-slate-300" />
+                    <p className="text-xs font-bold text-slate-500">{day} empty</p>
+                    <p className="text-[10px] uppercase font-black tracking-widest opacity-80 max-w-[200px] leading-relaxed">
+                      Drag spots from database here to schedule
+                    </p>
+                  </div>
+                )}
+              </SortableContext>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 // --- Helper Components ---
 
 const Badge = ({ children, className = "" }: { children: React.ReactNode, className?: string }) => (
@@ -1031,6 +1260,18 @@ const customCollisionDetection: CollisionDetection = (args) => {
 // --- Main Application ---
 
 export default function App() {
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+
+  // Authenticate user changes
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+      setIsAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
   const [places, setPlaces] = useState<Place[]>(() => {
     const savedPlaces = localStorage.getItem('saigon_places');
     if (savedPlaces) {
@@ -1055,7 +1296,8 @@ export default function App() {
     return INITIAL_PLACES;
   });
   const [activeTab, setActiveTab] = useState<Day>('Day 1');
-  const [scheduleMode, setScheduleMode] = useState<'list' | 'map'>('list');
+  const [expandedDays, setExpandedDays] = useState<Record<string, boolean>>({ 'Day 1': true });
+  const [scheduleMode, setScheduleMode] = useState<'itinerary' | 'list' | 'map'>('itinerary');
   const [selectedMapPlaceId, setSelectedMapPlaceId] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activePlace, setActivePlace] = useState<Place | null>(null);
@@ -1170,6 +1412,93 @@ export default function App() {
     localStorage.setItem('saigon_trip_info', JSON.stringify({ plannerName, arrivalDate, departureDate }));
   }, [plannerName, arrivalDate, departureDate]);
 
+  // Cloud Sync: Subscribe to Trip Metadata on Firestore
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const tripRef = doc(db, 'trips', currentUser.uid);
+    const unsubscribe = onSnapshot(tripRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setPlannerName((prev: string) => prev !== data.plannerName ? data.plannerName : prev);
+        setArrivalDate((prev: string) => prev !== data.arrivalDate ? data.arrivalDate : prev);
+        setDepartureDate((prev: string) => prev !== data.departureDate ? data.departureDate : prev);
+      } else {
+        try {
+          setDoc(tripRef, {
+            plannerName,
+            arrivalDate,
+            departureDate,
+            ownerId: currentUser.uid,
+            updatedAt: new Date().toISOString()
+          });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.WRITE, `trips/${currentUser.uid}`);
+        }
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, `trips/${currentUser.uid}`);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  // Cloud Sync: Subscribe to Place Documents inside user's trip subcollection
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const placesRef = collection(db, 'trips', currentUser.uid, 'places');
+    const unsubscribe = onSnapshot(placesRef, async (querySnap) => {
+      const fbPlaces: Place[] = [];
+      querySnap.forEach((doc) => {
+        fbPlaces.push(doc.data() as Place);
+      });
+
+      if (fbPlaces.length > 0) {
+        setPlaces(fbPlaces);
+      } else {
+        // Safe first-time migration of local state to Cloud Firestore
+        if (places.length > 0) {
+          const batch = writeBatch(db);
+          places.forEach((p) => {
+            const docRef = doc(db, 'trips', currentUser.uid, 'places', p.id);
+            batch.set(docRef, p);
+          });
+          try {
+            await batch.commit();
+          } catch (err) {
+            handleFirestoreError(err, OperationType.WRITE, `trips/${currentUser.uid}/places`);
+          }
+        }
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, `trips/${currentUser.uid}/places`);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  // Cloud Sync: Push user keystrokes / edits for trip info with 1s debounce
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const timeout = setTimeout(async () => {
+      try {
+        await setDoc(doc(db, 'trips', currentUser.uid), {
+          plannerName,
+          arrivalDate,
+          departureDate,
+          ownerId: currentUser.uid,
+          updatedAt: new Date().toISOString()
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, `trips/${currentUser.uid}`);
+      }
+    }, 1000);
+
+    return () => clearTimeout(timeout);
+  }, [plannerName, arrivalDate, departureDate, currentUser]);
+
   // Handlers
   const addPlace = (selectedPlace?: google.maps.places.Place) => {
     if (!selectedPlace && !newName.trim()) return;
@@ -1229,22 +1558,115 @@ export default function App() {
     setPlaces(prev => [...prev, newPlace]);
     setNewName('');
     setNewAddress('');
+
+    if (currentUser) {
+      // clean any undefined properties for Firestore compatibility
+      const cleanPlace = { ...newPlace };
+      if (cleanPlace.address === undefined) delete cleanPlace.address;
+      if (cleanPlace.day === undefined) delete cleanPlace.day;
+      if (cleanPlace.time === undefined) delete cleanPlace.time;
+      if (cleanPlace.expanded === undefined) delete cleanPlace.expanded;
+      if (cleanPlace.lat === undefined) delete cleanPlace.lat;
+      if (cleanPlace.lng === undefined) delete cleanPlace.lng;
+
+      setDoc(doc(db, 'trips', currentUser.uid, 'places', newPlace.id), cleanPlace)
+        .catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${currentUser.uid}/places/${newPlace.id}`));
+    }
   };
 
   const deletePlace = (id: string) => {
     setPlaces(prev => prev.filter(p => p.id !== id));
+    if (currentUser) {
+      deleteDoc(doc(db, 'trips', currentUser.uid, 'places', id))
+        .catch(err => handleFirestoreError(err, OperationType.DELETE, `trips/${currentUser.uid}/places/${id}`));
+    }
+  };
+
+  const clearDayStops = (day: Day) => {
+    setPlaces(prev => 
+      prev.map(p => {
+        if (p.day === day) {
+          const updated = { ...p };
+          delete updated.day;
+          delete updated.time;
+          
+          if (currentUser) {
+            // Write to Firestore to persist clearing
+            setDoc(doc(db, 'trips', currentUser.uid, 'places', p.id), updated)
+              .catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${currentUser.uid}/places/${p.id}`));
+          }
+          return updated;
+        }
+        return p;
+      })
+    );
   };
 
   const toggleExpand = (id: string) => {
-    setPlaces(prev => prev.map(p => p.id === id ? { ...p, expanded: !p.expanded } : p));
+    setPlaces(prev => {
+      const updated = prev.map(p => p.id === id ? { ...p, expanded: !p.expanded } : p);
+      if (currentUser) {
+        const target = updated.find(p => p.id === id);
+        if (target) {
+          const cleanTarget = { ...target };
+          if (cleanTarget.address === undefined) delete cleanTarget.address;
+          if (cleanTarget.day === undefined) delete cleanTarget.day;
+          if (cleanTarget.time === undefined) delete cleanTarget.time;
+          if (cleanTarget.expanded === undefined) delete cleanTarget.expanded;
+          if (cleanTarget.lat === undefined) delete cleanTarget.lat;
+          if (cleanTarget.lng === undefined) delete cleanTarget.lng;
+          setDoc(doc(db, 'trips', currentUser.uid, 'places', id), cleanTarget)
+            .catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${currentUser.uid}/places/${id}`));
+        }
+      }
+      return updated;
+    });
   };
 
   const updatePlaceDay = (id: string, day?: Day) => {
-    setPlaces(prev => prev.map(p => p.id === id ? { ...p, day } : p));
+    setPlaces(prev => {
+      const updated = prev.map(p => p.id === id ? { ...p, day } : p);
+      if (currentUser) {
+        const target = updated.find(p => p.id === id);
+        if (target) {
+          const cleanTarget = { ...target };
+          if (day === undefined) {
+            delete cleanTarget.day;
+          } else {
+            cleanTarget.day = day;
+          }
+          if (cleanTarget.address === undefined) delete cleanTarget.address;
+          if (cleanTarget.time === undefined) delete cleanTarget.time;
+          if (cleanTarget.expanded === undefined) delete cleanTarget.expanded;
+          if (cleanTarget.lat === undefined) delete cleanTarget.lat;
+          if (cleanTarget.lng === undefined) delete cleanTarget.lng;
+          setDoc(doc(db, 'trips', currentUser.uid, 'places', id), cleanTarget)
+            .catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${currentUser.uid}/places/${id}`));
+        }
+      }
+      return updated;
+    });
   };
 
   const updatePlaceTime = (id: string, time: string) => {
-    setPlaces(prev => prev.map(p => p.id === id ? { ...p, time } : p));
+    setPlaces(prev => {
+      const updated = prev.map(p => p.id === id ? { ...p, time } : p);
+      if (currentUser) {
+        const target = updated.find(p => p.id === id);
+        if (target) {
+          const cleanTarget = { ...target };
+          cleanTarget.time = time;
+          if (cleanTarget.address === undefined) delete cleanTarget.address;
+          if (cleanTarget.day === undefined) delete cleanTarget.day;
+          if (cleanTarget.expanded === undefined) delete cleanTarget.expanded;
+          if (cleanTarget.lat === undefined) delete cleanTarget.lat;
+          if (cleanTarget.lng === undefined) delete cleanTarget.lng;
+          setDoc(doc(db, 'trips', currentUser.uid, 'places', id), cleanTarget)
+            .catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${currentUser.uid}/places/${id}`));
+        }
+      }
+      return updated;
+    });
   };
 
   // Drag Handlers
@@ -1336,8 +1758,8 @@ export default function App() {
         <main className="max-w-6xl mx-auto p-6 md:p-8 grid lg:grid-cols-[1fr_300px] gap-6 lg:gap-10">
           
           {/* Main Content Area */}
-          <div className="space-y-6">
-            <header className="flex flex-col sm:flex-row sm:items-start justify-between gap-6 mb-10">
+          <div className="space-y-6 min-w-0">
+            <header className="flex flex-col lg:flex-row lg:items-start justify-between gap-6 mb-10 border-b border-rose-50/10 pb-6">
               <div className="space-y-4 flex-1">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 bg-ink rounded-xl flex items-center justify-center text-white shrink-0">
@@ -1374,10 +1796,83 @@ export default function App() {
                 </div>
               </div>
               
-              <div className="hidden sm:block pt-1">
-                <Badge className="bg-[#DBEAFE] text-[#1E40AF] px-4 py-2 text-[11px] shadow-sm whitespace-nowrap">
-                  {new Date(arrivalDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} • Master Log
-                </Badge>
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                {isAuthLoading ? (
+                  <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-xs font-semibold text-slate-400">
+                    <div className="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
+                    Checking Sync Status...
+                  </div>
+                ) : currentUser ? (
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2.5 bg-indigo-50/70 border border-indigo-100 rounded-2xl px-3 py-1.5 shadow-sm">
+                      {currentUser.photoURL ? (
+                        <img 
+                          src={currentUser.photoURL} 
+                          alt={currentUser.displayName || "User"} 
+                          className="w-6 h-6 rounded-full border border-indigo-200"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-bold">
+                          {currentUser.displayName?.charAt(0) || "U"}
+                        </div>
+                      )}
+                      
+                      <div className="text-left">
+                        <p className="text-[10px] font-bold text-indigo-900 leading-tight">
+                          {currentUser.displayName || "Explorer"}
+                        </p>
+                        <div className="flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          <span className="text-[8px] font-bold tracking-wider text-emerald-600 uppercase">
+                            Synced & Live
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <button
+                      onClick={async () => {
+                        try {
+                          await signOut(auth);
+                        } catch (err) {
+                          console.error("Signout error:", err);
+                        }
+                      }}
+                      className="text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-rose-600 transition-colors px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer"
+                    >
+                      Sign Out
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={async () => {
+                        try {
+                          await signInWithPopup(auth, googleProvider);
+                        } catch (err) {
+                          console.error("Login Error: ", err);
+                        }
+                      }}
+                      className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold font-sans text-xs px-4 py-2.5 rounded-xl shadow-md cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98]"
+                    >
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12.24 10.285V13.4h6.887C18.2 15.614 15.645 18 12.24 18c-3.86 0-7-3.14-7-7s3.14-7 7-7c1.71 0 3.27.61 4.5 1.62l2.437-2.437C17.312 1.696 14.933 1 12.24 1 6.58 1 2 5.58 2 11.24s4.58 10.24 10.24 10.24c5.795 0 10.254-4.074 10.254-10.24 0-.695-.081-1.355-.224-1.955H12.24z"/>
+                      </svg>
+                      <span>Sync Devices</span>
+                    </button>
+                    
+                    <span className="hidden sm:inline-block text-[9px] font-bold text-slate-400 leading-tight uppercase max-w-[120px] text-left">
+                      💡 Log in to keep MacBook & iPhone in perfect sync
+                    </span>
+                  </div>
+                )}
+                
+                <div className="hidden sm:block">
+                  <Badge className="bg-[#DBEAFE] text-[#1E40AF] px-4 py-2 text-[11px] shadow-sm whitespace-nowrap">
+                    {new Date(arrivalDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} • Master Log
+                  </Badge>
+                </div>
               </div>
             </header>
 
@@ -1706,24 +2201,42 @@ export default function App() {
               className={`section-card min-h-[400px] p-6 flex flex-col gap-6 transition-all ${isOverChecklist ? 'ring-2 ring-ink ring-offset-2' : ''}`}
               ref={setChecklistRef}
             >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-3">
-                <h2 className="text-sm font-bold text-slate-500 uppercase tracking-widest">Travel Schedule</h2>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                <div className="flex items-center gap-3">
+                  <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">Itinerary</h2>
+                  
+                  {/* Date Range Pill from Screenshot */}
+                  <div className="inline-flex items-center gap-2 bg-slate-50 border border-slate-200/50 px-3.5 py-1 text-slate-600 font-bold rounded-full text-xs shrink-0 select-none">
+                    <Calendar className="w-3.5 h-3.5 stroke-[2.5] text-slate-400" />
+                    <span className="font-sans font-extrabold">{getFormattedDateRange(arrivalDate, departureDate)}</span>
+                  </div>
+                </div>
                 
                 {/* Mode Toggle Selector */}
                 <div className="flex bg-slate-100 p-0.5 rounded-lg text-xs font-bold font-sans self-start sm:self-auto shrink-0 select-none">
                   <button 
+                    onClick={() => setScheduleMode('itinerary')}
+                    className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-all cursor-pointer ${
+                      scheduleMode === 'itinerary' 
+                        ? 'bg-white text-slate-900 shadow-sm' 
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <span>📅 Itinerary</span>
+                  </button>
+                  <button 
                     onClick={() => setScheduleMode('list')}
-                    className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-all ${
+                    className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-all cursor-pointer ${
                       scheduleMode === 'list' 
                         ? 'bg-white text-slate-900 shadow-sm' 
                         : 'text-slate-500 hover:text-slate-800'
                     }`}
                   >
-                    <span>📋 List View</span>
+                    <span>📋 Day Tabs</span>
                   </button>
                   <button 
                     onClick={() => setScheduleMode('map')}
-                    className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-all ${
+                    className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-all cursor-pointer ${
                       scheduleMode === 'map' 
                         ? 'bg-white text-slate-900 shadow-sm' 
                         : 'text-slate-500 hover:text-slate-800'
@@ -1739,68 +2252,118 @@ export default function App() {
                 </div>
               </div>
               
-              <div className="flex bg-slate-100 p-1 rounded-xl overflow-x-auto no-scrollbar">
-                {DAYS.map((day) => (
-                  <DroppableTab 
-                    key={day}
-                    day={day}
-                    activeTab={activeTab}
-                    setActiveTab={setActiveTab}
-                  />
-                ))}
-              </div>
+              {/* Itinerary Accordion Layout (Matches Screenshot) */}
+              {scheduleMode === 'itinerary' && (
+                <div className="flex-1 space-y-2">
+                  {DAYS.map((day) => (
+                    <ItineraryAccordionRow
+                      key={day}
+                      day={day}
+                      isExpanded={!!expandedDays[day]}
+                      onToggle={() => {
+                        setExpandedDays(prev => ({
+                          ...prev,
+                          [day]: !prev[day]
+                        }));
+                        setActiveTab(day);
+                      }}
+                      arrivalDate={arrivalDate}
+                      places={places}
+                      updatePlaceTime={updatePlaceTime}
+                      deletePlace={deletePlace}
+                      toggleExpand={toggleExpand}
+                      onClearDay={clearDayStops}
+                    />
+                  ))}
+                </div>
+              )}
 
-              {scheduleMode === 'list' ? (
-                <div className="flex-1 overflow-y-auto pr-2 no-scrollbar">
-                  <SortableContext 
-                    items={filteredPlaces.map(p => `itinerary-${p.id}`)}
-                    strategy={verticalListSortingStrategy}
-                  >
-                    <AnimatePresence mode="wait">
-                      <motion.div 
-                        key={activeTab}
-                        initial={{ opacity: 0, y: 5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -5 }}
-                        className="space-y-4"
-                      >
-                        {filteredPlaces.length > 0 ? filteredPlaces.map((place) => (
-                          <DraggableItineraryItem 
-                            key={place.id}
-                            place={place}
-                            updatePlaceTime={updatePlaceTime}
-                            deletePlace={deletePlace}
-                            toggleExpand={toggleExpand}
-                          />
-                        )) : (
-                          <div className="h-40 flex flex-col items-center justify-center text-slate-300 italic text-sm text-center gap-2">
-                            <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center">
-                              <MapPin className="w-6 h-6" />
+              {/* Day Tabs Layout / Old List View */}
+              {scheduleMode === 'list' && (
+                <>
+                  <div className="flex bg-slate-100 p-1 rounded-xl overflow-x-auto no-scrollbar">
+                    {DAYS.map((day) => (
+                      <DroppableTab 
+                        key={day}
+                        day={day}
+                        activeTab={activeTab}
+                        setActiveTab={setActiveTab}
+                      />
+                    ))}
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto pr-2 no-scrollbar">
+                    <SortableContext 
+                      items={filteredPlaces.map(p => `itinerary-${p.id}`)}
+                      strategy={verticalListSortingStrategy}
+                    >
+                      <AnimatePresence mode="wait">
+                        <motion.div 
+                          key={activeTab}
+                          initial={{ opacity: 0, y: 5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -5 }}
+                          className="space-y-4"
+                        >
+                          {filteredPlaces.length > 0 ? filteredPlaces.map((place) => (
+                            <DraggableItineraryItem 
+                              key={place.id}
+                              place={place}
+                              updatePlaceTime={updatePlaceTime}
+                              deletePlace={deletePlace}
+                              toggleExpand={toggleExpand}
+                            />
+                          )) : (
+                            <div className="h-40 flex flex-col items-center justify-center text-slate-400 italic text-sm text-center gap-2">
+                              <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center">
+                                <MapPin className="w-6 h-6" />
+                              </div>
+                              <p>Nothing planned for {activeTab}</p>
+                              <p className="text-[10px] uppercase font-bold tracking-widest mt-2 px-10">Drag from Database into here or onto tabs to schedule</p>
                             </div>
-                            <p>Nothing planned for {activeTab}</p>
-                            <p className="text-[10px] uppercase font-bold tracking-widest mt-2 px-10">Drag from Database into here or onto tabs to schedule</p>
-                          </div>
-                        )}
-                      </motion.div>
-                    </AnimatePresence>
-                  </SortableContext>
-                </div>
-              ) : (
-                <div className="flex-1 overflow-visible">
-                  {hasValidKey ? (
-                    <RealGoogleMap 
-                      places={filteredPlaces} 
-                      selectedId={selectedMapPlaceId} 
-                      onSelectId={setSelectedMapPlaceId} 
-                    />
-                  ) : (
-                    <MockInteractiveMap 
-                      places={filteredPlaces} 
-                      selectedId={selectedMapPlaceId} 
-                      onSelectId={setSelectedMapPlaceId} 
-                    />
-                  )}
-                </div>
+                          )}
+                        </motion.div>
+                      </AnimatePresence>
+                    </SortableContext>
+                  </div>
+                </>
+              )}
+
+              {/* Route Map View Layout */}
+              {scheduleMode === 'map' && (
+                <>
+                  <div className="flex bg-slate-100 p-1 rounded-xl overflow-x-auto no-scrollbar">
+                    {DAYS.map((day) => (
+                      <button
+                        key={day}
+                        onClick={() => setActiveTab(day)}
+                        className={`flex-1 py-1 px-3 rounded-lg text-xs font-bold transition-all whitespace-nowrap min-w-[70px] ${
+                          activeTab === day 
+                            ? 'bg-white text-ink shadow-sm font-black text-slate-800' 
+                            : 'text-slate-500 hover:text-ink/60'
+                        }`}
+                      >
+                        {day}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex-1 overflow-visible min-h-[400px]">
+                    {hasValidKey ? (
+                      <RealGoogleMap 
+                        places={filteredPlaces} 
+                        selectedId={selectedMapPlaceId} 
+                        onSelectId={setSelectedMapPlaceId} 
+                      />
+                    ) : (
+                      <MockInteractiveMap 
+                        places={filteredPlaces} 
+                        selectedId={selectedMapPlaceId} 
+                        onSelectId={setSelectedMapPlaceId} 
+                      />
+                    )}
+                  </div>
+                </>
               )}
             </section>
           </div>
