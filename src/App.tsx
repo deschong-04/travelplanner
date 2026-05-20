@@ -48,7 +48,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { restrictToWindowEdges } from '@dnd-kit/modifiers';
 import { db, auth, googleProvider, handleFirestoreError, OperationType } from './firebase';
-import { onAuthStateChanged, signInWithPopup, signOut, User as FirebaseUser } from 'firebase/auth';
+import { onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, User as FirebaseUser } from 'firebase/auth';
 import { doc, collection, setDoc, deleteDoc, onSnapshot, writeBatch } from 'firebase/firestore';
 
 // --- Types & Constants ---
@@ -1265,12 +1265,59 @@ export default function App() {
 
   // Authenticate user changes
   useEffect(() => {
+    setIsAuthLoading(true);
+    // Retrieve redirect result if we just returned from Google sign-in redirect
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user) {
+          setCurrentUser(result.user);
+        }
+      })
+      .catch((error) => {
+        console.error("Redirect Sign-In Error:", error);
+      });
+
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
       setIsAuthLoading(false);
     });
     return () => unsubscribe();
   }, []);
+
+  const handleLogin = async () => {
+    setIsAuthLoading(true);
+    // Safari on macOS and iOS blocks popup auth frames or closes popups immediately because of Intelligent Tracking Prevention.
+    const isSafari = /Safari/i.test(navigator.userAgent) && !/Chrome/i.test(navigator.userAgent);
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+    if (isSafari || isIOS) {
+      console.log("Safari/iOS device detected. Redirecting for robust & seamless login experience.");
+      try {
+        await signInWithRedirect(auth, googleProvider);
+      } catch (err) {
+        console.error("Redirect login error:", err);
+        setIsAuthLoading(false);
+      }
+      return;
+    }
+
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (err: any) {
+      console.error("Popup login failed, initiating redirect fallback:", err);
+      // Fallback on blocks, closures, or popup errors
+      if (err.code === 'auth/popup-blocked' || err.code === 'auth/popup-closed-by-user' || err.message?.includes('popup')) {
+        try {
+          await signInWithRedirect(auth, googleProvider);
+        } catch (redirectErr) {
+          console.error("Redirect fallback login failed:", redirectErr);
+          setIsAuthLoading(false);
+        }
+      } else {
+        setIsAuthLoading(false);
+      }
+    }
+  };
 
   const [places, setPlaces] = useState<Place[]>(() => {
     const savedPlaces = localStorage.getItem('saigon_places');
@@ -1847,13 +1894,7 @@ export default function App() {
                 ) : (
                   <div className="flex items-center gap-3">
                     <button
-                      onClick={async () => {
-                        try {
-                          await signInWithPopup(auth, googleProvider);
-                        } catch (err) {
-                          console.error("Login Error: ", err);
-                        }
-                      }}
+                      onClick={handleLogin}
                       className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold font-sans text-xs px-4 py-2.5 rounded-xl shadow-md cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98]"
                     >
                       <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
@@ -1862,8 +1903,8 @@ export default function App() {
                       <span>Sync Devices</span>
                     </button>
                     
-                    <span className="hidden sm:inline-block text-[9px] font-bold text-slate-400 leading-tight uppercase max-w-[120px] text-left">
-                      💡 Log in to keep MacBook & iPhone in perfect sync
+                    <span className="hidden sm:inline-block text-[9px] font-bold text-slate-400 leading-tight uppercase max-w-[150px] text-left">
+                      💡 Dynamically handles Safari & iPhone popups via redirect
                     </span>
                   </div>
                 )}
