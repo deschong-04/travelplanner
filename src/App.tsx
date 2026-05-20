@@ -15,10 +15,13 @@ import {
   GripVertical,
   Search,
   Map as MapIcon,
-  ExternalLink
+  ExternalLink,
+  Compass,
+  Navigation,
+  Car
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { APIProvider, useMapsLibrary } from '@vis.gl/react-google-maps';
+import { APIProvider, useMapsLibrary, Map, AdvancedMarker, Pin, InfoWindow, useMap } from '@vis.gl/react-google-maps';
 import {
   DndContext,
   closestCenter,
@@ -59,10 +62,22 @@ interface Place {
   day?: Day;
   time?: string;
   expanded?: boolean;
+  lat?: number;
+  lng?: number;
 }
 
 const DISTRICTS: District[] = ['D1', 'D3', 'D4', 'D5', 'D7', 'Binh Thanh', 'Thu Duc'];
 const CATEGORIES: Category[] = ['Food', 'Fashion', 'Coffee', 'Spa', 'Sightseeing', 'Nightlife'];
+
+const DISTRICT_COORDS: Record<District, { lat: number; lng: number }> = {
+  'D1': { lat: 10.7760, lng: 106.7000 },
+  'D3': { lat: 10.7830, lng: 106.6880 },
+  'D4': { lat: 10.7580, lng: 106.7082 },
+  'D5': { lat: 10.7540, lng: 106.6630 },
+  'D7': { lat: 10.7280, lng: 106.7202 },
+  'Binh Thanh': { lat: 10.8030, lng: 106.7120 },
+  'Thu Duc': { lat: 10.8490, lng: 106.7720 },
+};
 
 // --- Day Helper ---
 function getDayList(arrival: string, departure: string): string[] {
@@ -80,39 +95,39 @@ function getDayList(arrival: string, departure: string): string[] {
 }
 
 const INITIAL_PLACES: Place[] = [
-  { id: '1', name: 'Bánh Canh Cua 87', district: 'D1', category: 'Food', day: 'Day 1', time: '11:00', address: '87 Trần Khắc Chân, Tân Định, Quận 1' },
-  { id: '2', name: 'The New Playground', district: 'D1', category: 'Fashion', day: 'Day 1', time: '13:00', address: '26 Lý Tự Trọng, Bến Nghé, Quận 1' },
-  { id: '3', name: 'OKKIO Cà Phê', district: 'D1', category: 'Coffee', day: 'Day 1', time: '14:30', address: '122 Đ. Lê Lợi, Phường Bến Thành, Quận 1' },
-  { id: '4', name: 'Miu Miu Spa 2', district: 'D1', category: 'Spa', day: 'Day 1', time: '16:00', address: '2B Chu Mạnh Trinh, Bến Nghé, Quận 1' },
-  { id: '5', name: 'Phở Việt Nam Stone Bowl', district: 'D1', category: 'Food', day: 'Day 1', time: '19:00', address: '14 Phạm Hồng Thái, Phường Bến Thành, Quận 1' },
-  { id: '6', name: 'The Cafe Apartment 42 Nguyen Hue', district: 'D1', category: 'Coffee', day: 'Day 2', time: '10:00', address: '42 Nguyễn Huệ, Bến Nghé, Quận 1' },
-  { id: '7', name: 'Cà Phê Muối Chú Long', district: 'D1', category: 'Coffee', day: 'Day 2', time: '11:30', address: '104 Đ. Lê Lợi, Phường Bến Thành, Quận 1' },
-  { id: '8', name: 'Union Square & Rue Miche', district: 'D1', category: 'Fashion', day: 'Day 2', time: '13:00', address: '171 Đ. Đồng Khởi, Bến Nghé, Quận 1' },
-  { id: '9', name: 'Norah Spa 3', district: 'D1', category: 'Spa', day: 'Day 2', time: '15:00', address: '118 Đ. Nguyễn Du, Phường Bến Thành, Quận 1' },
-  { id: '10', name: 'Pink Church & Ola Hale', district: 'D3', category: 'Sightseeing', day: 'Day 2', time: '16:30', address: '289 Hai Bà Trưng, Phường 8, Quận 3' },
-  { id: '11', name: 'LIDER', district: 'D1', category: 'Fashion', day: 'Day 2', time: '17:30', address: '42 Tôn Thất Thiệp, Bến Nghé, Quận 1' },
-  { id: '12', name: 'Secret Garden Rooftop', district: 'D1', category: 'Food', day: 'Day 2', time: '19:30', address: '158 Pasteur, Bến Nghé, Quận 1' },
-  { id: '13', name: 'Highway Menswear', district: 'D3', category: 'Fashion', day: 'Day 3', time: '10:00', address: '16 Phạm Ngọc Thạch, Quận 3' },
-  { id: '14', name: 'Compound Garment Alley 158', district: 'D1', category: 'Fashion', day: 'Day 3', time: '11:30', address: '158 Pasteur, Bến Nghé, Quận 1' },
-  { id: '15', name: 'WEPHOBIA & 11 Garmentory', district: 'D1', category: 'Fashion', day: 'Day 3', time: '13:00', address: '39 Đ. Lê Duẩn, Bến Nghé, Quận 1' },
-  { id: '16', name: 'Nguyen Van Binh Book Street', district: 'D1', category: 'Sightseeing', day: 'Day 3', time: '14:30', address: 'Đường Nguyễn Văn Bình, Bến Nghé, Quận 1' },
-  { id: '17', name: 'Sen Trắng Hair Spa', district: 'D1', category: 'Spa', day: 'Day 3', time: '16:00', address: '150/19 Nguyễn Trãi, Phường Phạm Ngũ Lão, Quận 1' },
-  { id: '18', name: 'Quán Bụi Lê Thánh Tôn', district: 'D1', category: 'Food', day: 'Day 3', time: '19:00', address: '17A Ngô Văn Năm, Bến Nghé, Quận 1' },
+  { id: '1', name: 'Bánh Canh Cua 87', district: 'D1', category: 'Food', day: 'Day 1', time: '11:00', address: '87 Trần Khắc Chân, Tân Định, Quận 1', lat: 10.7915, lng: 106.6885 },
+  { id: '2', name: 'The New Playground', district: 'D1', category: 'Fashion', day: 'Day 1', time: '13:00', address: '26 Lý Tự Trọng, Bến Nghé, Quận 1', lat: 10.7782, lng: 106.7020 },
+  { id: '3', name: 'OKKIO Cà Phê', district: 'D1', category: 'Coffee', day: 'Day 1', time: '14:30', address: '122 Đ. Lê Lợi, Phường Bến Thành, Quận 1', lat: 10.7735, lng: 106.6990 },
+  { id: '4', name: 'Miu Miu Spa 2', district: 'D1', category: 'Spa', day: 'Day 1', time: '16:00', address: '2B Chu Mạnh Trinh, Bến Nghé, Quận 1', lat: 10.7810, lng: 106.7052 },
+  { id: '5', name: 'Phở Việt Nam Stone Bowl', district: 'D1', category: 'Food', day: 'Day 1', time: '19:00', address: '14 Phạm Hồng Thái, Phường Bến Thành, Quận 1', lat: 10.7725, lng: 106.6946 },
+  { id: '6', name: 'The Cafe Apartment 42 Nguyen Hue', district: 'D1', category: 'Coffee', day: 'Day 2', time: '10:00', address: '42 Nguyễn Huệ, Bến Nghé, Quận 1', lat: 10.7741, lng: 106.7037 },
+  { id: '7', name: 'Cà Phê Muối Chú Long', district: 'D1', category: 'Coffee', day: 'Day 2', time: '11:30', address: '104 Đ. Lê Lợi, Phường Bến Thành, Quận 1', lat: 10.7745, lng: 106.6998 },
+  { id: '8', name: 'Union Square & Rue Miche', district: 'D1', category: 'Fashion', day: 'Day 2', time: '13:00', address: '171 Đ. Đồng Khởi, Bến Nghé, Quận 1', lat: 10.7758, lng: 106.7025 },
+  { id: '9', name: 'Norah Spa 3', district: 'D1', category: 'Spa', day: 'Day 2', time: '15:00', address: '118 Đ. Nguyễn Du, Phường Bến Thành, Quận 1', lat: 10.7750, lng: 106.6935 },
+  { id: '10', name: 'Pink Church & Ola Hale', district: 'D3', category: 'Sightseeing', day: 'Day 2', time: '16:30', address: '289 Hai Bà Trưng, Phường 8, Quận 3', lat: 10.7909, lng: 106.6908 },
+  { id: '11', name: 'LIDER', district: 'D1', category: 'Fashion', day: 'Day 2', time: '17:30', address: '42 Tôn Thất Thiệp, Bến Nghé, Quận 1', lat: 10.7730, lng: 106.7032 },
+  { id: '12', name: 'Secret Garden Rooftop', district: 'D1', category: 'Food', day: 'Day 2', time: '19:30', address: '158 Pasteur, Bến Nghé, Quận 1', lat: 10.7773, lng: 106.6987 },
+  { id: '13', name: 'Highway Menswear', district: 'D3', category: 'Fashion', day: 'Day 3', time: '10:00', address: '16 Phạm Ngọc Thạch, Quận 3', lat: 10.7828, lng: 106.6963 },
+  { id: '14', name: 'Compound Garment Alley 158', district: 'D1', category: 'Fashion', day: 'Day 3', time: '11:30', address: '158 Pasteur, Bến Nghé, Quận 1', lat: 10.7773, lng: 106.6987 },
+  { id: '15', name: 'WEPHOBIA & 11 Garmentory', district: 'D1', category: 'Fashion', day: 'Day 3', time: '13:00', address: '39 Đ. Lê Duẩn, Bến Nghé, Quận 1', lat: 10.7833, lng: 106.7005 },
+  { id: '16', name: 'Nguyen Van Binh Book Street', district: 'D1', category: 'Sightseeing', day: 'Day 3', time: '14:30', address: 'Đường Nguyễn Văn Bình, Bến Nghé, Quận 1', lat: 10.7797, lng: 106.6995 },
+  { id: '17', name: 'Sen Trắng Hair Spa', district: 'D1', category: 'Spa', day: 'Day 3', time: '16:00', address: '150/19 Nguyễn Trãi, Phường Phạm Ngũ Lão, Quận 1', lat: 10.7695, lng: 106.6892 },
+  { id: '18', name: 'Quán Bụi Lê Thánh Tôn', district: 'D1', category: 'Food', day: 'Day 3', time: '19:00', address: '17A Ngô Văn Năm, Bến Nghé, Quận 1', lat: 10.7818, lng: 106.7061 },
 ];
 
 const VND_PER_SGD = 20600;
 
 const RECOMMENDED_PLACES: Omit<Place, 'id'>[] = [
-  { name: 'Bánh Mì Huỳnh Hoa', district: 'D1', category: 'Food', address: '26 Lê Thị Riêng, Phường Phạm Ngũ Lão, Quận 1' },
-  { name: "Pizza 4P's Ben Thanh", district: 'D1', category: 'Food', address: '8 Thủ Khoa Huân, Phường Bến Thành, Quận 1' },
-  { name: 'Highlands Coffee Opera House', district: 'D1', category: 'Coffee', address: '7 Công Trường Lam Sơn, Bến Nghé, Quận 1' },
-  { name: 'War Remnants Museum', district: 'D3', category: 'Sightseeing', address: '28 Võ Văn Tần, Phường 6, Quận 3' },
-  { name: 'Ben Thanh Market', district: 'D1', category: 'Sightseeing', address: 'Lê Lợi, Phường Bến Thành, Quận 1' },
-  { name: 'Bitexco Financial Tower', district: 'D1', category: 'Sightseeing', address: '2 Hải Triều, Bến Nghé, Quận 1' },
-  { name: 'Pasteur Street Brewing Co.', district: 'D1', category: 'Nightlife', address: '144 Pasteur, Bến Nghé, Quận 1' },
-  { name: 'Saigon Central Post Office', district: 'D1', category: 'Sightseeing', address: '2 Công xã Paris, Bến Nghé, Quận 1' },
-  { name: 'The New Playground', district: 'D1', category: 'Fashion', address: '26 Lý Tự Trọng, Bến Nghé, Quận 1' },
-  { name: 'Miu Miu Spa', district: 'D1', category: 'Spa', address: '4 Chu Mạnh Trinh, Bến Nghé, Quận 1' },
+  { name: 'Bánh Mì Huỳnh Hoa', district: 'D1', category: 'Food', address: '26 Lê Thị Riêng, Phường Phạm Ngũ Lão, Quận 1', lat: 10.7735, lng: 106.6914 },
+  { name: "Pizza 4P's Ben Thanh", district: 'D1', category: 'Food', address: '8 Thủ Khoa Huân, Phường Bến Thành, Quận 1', lat: 10.7731, lng: 106.6963 },
+  { name: 'Highlands Coffee Opera House', district: 'D1', category: 'Coffee', address: '7 Công Trường Lam Sơn, Bến Nghé, Quận 1', lat: 10.7765, lng: 106.7032 },
+  { name: 'War Remnants Museum', district: 'D3', category: 'Sightseeing', address: '28 Võ Văn Tần, Phường 6, Quận 3', lat: 10.7795, lng: 106.6908 },
+  { name: 'Ben Thanh Market', district: 'D1', category: 'Sightseeing', address: 'Lê Lợi, Phường Bến Thành, Quận 1', lat: 10.7725, lng: 106.6980 },
+  { name: 'Bitexco Financial Tower', district: 'D1', category: 'Sightseeing', address: '2 Hải Triều, Bến Nghé, Quận 1', lat: 10.7716, lng: 106.7044 },
+  { name: 'Pasteur Street Brewing Co.', district: 'D1', category: 'Nightlife', address: '144 Pasteur, Bến Nghé, Quận 1', lat: 10.7773, lng: 106.6987 },
+  { name: 'Saigon Central Post Office', district: 'D1', category: 'Sightseeing', address: '2 Công xã Paris, Bến Nghé, Quận 1', lat: 10.7798, lng: 106.6999 },
+  { name: 'The New Playground', district: 'D1', category: 'Fashion', address: '26 Lý Tự Trọng, Bến Nghé, Quận 1', lat: 10.7782, lng: 106.7020 },
+  { name: 'Miu Miu Spa', district: 'D1', category: 'Spa', address: '4 Chu Mạnh Trinh, Bến Nghé, Quận 1', lat: 10.7810, lng: 106.7052 },
 ];
 
 // --- Time Helpers ---
@@ -170,6 +185,417 @@ function AppProvider({ children }: { children: React.ReactNode }) {
     );
   }
   return <>{children}</>;
+}
+
+// --- Map Subcomponents ---
+
+function MapRoutePolyline({ places }: { places: Place[] }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!map || places.length < 2) return;
+    const path = places.map(p => ({ lat: p.lat!, lng: p.lng! }));
+    const polyline = new google.maps.Polyline({
+      path,
+      strokeColor: '#4f46e5',
+      strokeOpacity: 0.8,
+      strokeWeight: 4,
+      map
+    });
+    return () => polyline.setMap(null);
+  }, [map, places]);
+  return null;
+}
+
+function RealGoogleMap({ 
+  places, 
+  selectedId, 
+  onSelectId 
+}: { 
+  places: Place[]; 
+  selectedId: string | null; 
+  onSelectId: (id: string | null) => void; 
+}) {
+  const map = useMap();
+  const validPlaces = useMemo(() => {
+    return places.filter(p => p.lat !== undefined && p.lng !== undefined);
+  }, [places]);
+
+  const initialCenter = useMemo(() => {
+    if (validPlaces.length > 0) {
+      return { lat: validPlaces[0].lat!, lng: validPlaces[0].lng! };
+    }
+    return { lat: 10.7760, lng: 106.7000 };
+  }, [validPlaces]);
+
+  useEffect(() => {
+    if (map && validPlaces.length > 0) {
+      const bounds = new google.maps.LatLngBounds();
+      validPlaces.forEach(p => bounds.extend({ lat: p.lat!, lng: p.lng! }));
+      map.fitBounds(bounds, { top: 50, bottom: 50, left: 50, right: 50 });
+    }
+  }, [map, validPlaces]);
+
+  return (
+    <div className="w-full h-[450px] rounded-2xl overflow-hidden border border-slate-200 relative shadow-sm">
+      <Map
+        defaultCenter={initialCenter}
+        defaultZoom={14}
+        mapId="saigon_planner_map_id"
+        style={{ width: '100%', height: '100%' }}
+        gestureHandling="cooperative"
+      >
+        <MapRoutePolyline places={validPlaces} />
+        {validPlaces.map((place, index) => {
+          const position = { lat: place.lat!, lng: place.lng! };
+          const isSelected = selectedId === place.id;
+          return (
+            <React.Fragment key={place.id}>
+              <AdvancedMarker
+                position={position}
+                onClick={() => onSelectId(isSelected ? null : place.id)}
+              >
+                <div className={`cursor-pointer transition-all ${isSelected ? 'scale-125 z-50 animate-bounce' : 'scale-110'}`}>
+                  <Pin 
+                    background={isSelected ? '#10b981' : '#4f46e5'} 
+                    borderColor="#fff" 
+                    glyphColor="#fff"
+                    glyphText={(index + 1).toString()}
+                  />
+                </div>
+              </AdvancedMarker>
+
+              {isSelected && (
+                <InfoWindow
+                  position={position}
+                  onCloseClick={() => onSelectId(null)}
+                >
+                  <div className="p-1 max-w-[200px] text-xs">
+                    <p className="font-extrabold text-slate-800 text-[13px] mb-1">{place.name}</p>
+                    <p className="text-[10px] font-sans text-slate-400 font-bold uppercase tracking-wider mb-2">
+                      {formatTimeTo12h(place.time)} • {place.district}
+                    </p>
+                    <p className="text-[11px] text-slate-600 leading-tight mb-2">{place.address || 'No address stored'}</p>
+                    <div className="flex gap-2">
+                      <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[9px] font-bold">
+                        {place.category}
+                      </span>
+                    </div>
+                  </div>
+                </InfoWindow>
+              )}
+            </React.Fragment>
+          );
+        })}
+      </Map>
+    </div>
+  );
+}
+
+function MockInteractiveMap({
+  places,
+  selectedId,
+  onSelectId
+}: {
+  places: Place[];
+  selectedId: string | null;
+  onSelectId: (id: string | null) => void;
+}) {
+  const [activeSegment, setActiveSegment] = useState<number | null>(null);
+
+  // HCM Grid Bounds
+  const minLat = 10.75;
+  const maxLat = 10.81;
+  const minLng = 10.67;
+  const maxLng = 10.73;
+
+  const points = useMemo(() => {
+    return places.map((place, idx) => {
+      const lat = place.lat || 10.77;
+      const lng = place.lng || 10.70;
+
+      const x = 50 + ((lng - minLng) / (maxLng - minLng)) * 420;
+      const y = 350 - ((lat - minLat) / (maxLat - minLat)) * 280;
+
+      return {
+        id: place.id,
+        name: place.name,
+        time: place.time,
+        district: place.district,
+        category: place.category,
+        address: place.address,
+        x,
+        y,
+        lat,
+        lng,
+        index: idx + 1
+      };
+    });
+  }, [places]);
+
+  const selectedPlace = useMemo(() => {
+    return points.find(p => p.id === selectedId);
+  }, [points, selectedId]);
+
+  const segments = useMemo(() => {
+    const list = [];
+    for (let i = 0; i < points.length - 1; i++) {
+      const p1 = points[i];
+      const p2 = points[i+1];
+      const dLat = p2.lat - p1.lat;
+      const dLng = p2.lng - p1.lng;
+      const dist = Math.sqrt(dLat * dLat + dLng * dLng) * 111; // in KM
+      const fare = Math.max(22000, Math.round(dist * 13500)); // base Grab fare in VND
+
+      list.push({
+        from: p1.name,
+        to: p2.name,
+        distance: dist.toFixed(1),
+        fare: fare.toLocaleString(),
+        p1,
+        p2
+      });
+    }
+    return list;
+  }, [points]);
+
+  return (
+    <div className="w-full bg-[#FAFAFC] rounded-2xl border border-slate-200/80 p-5 space-y-5 shadow-sm relative overflow-hidden">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-2.5 h-2.5 bg-amber-500 rounded-full animate-pulse" />
+            <h3 className="text-sm font-black text-slate-800 tracking-tight uppercase">Saigon Interactive Transit Router</h3>
+          </div>
+          <p className="text-[11px] text-slate-400 mt-0.5">Offline Fallback View (VITE_GOOGLE_MAPS_PLATFORM_KEY not set)</p>
+        </div>
+
+        <div className="bg-amber-50 border border-amber-200/50 rounded-xl px-3 py-1.5 text-[10px] text-amber-800 leading-normal max-w-sm">
+          💡 <strong>Tip:</strong> Create <code>VITE_GOOGLE_MAPS_PLATFORM_KEY</code> in project secrets to unlock high-definition hybrid Google maps.
+        </div>
+      </div>
+
+      {places.length === 0 ? (
+        <div className="h-64 flex flex-col items-center justify-center text-slate-300 italic text-sm text-center bg-white rounded-xl border border-slate-100 gap-2">
+          <Compass className="w-10 h-10 text-slate-200 animate-pulse" />
+          <p>No stops planned for this day yet.</p>
+          <p className="text-[10px] uppercase font-bold tracking-wider">Plan stops in schedule first to synthesize a route chart</p>
+        </div>
+      ) : (
+        <div className="grid lg:grid-cols-[2fr_1.1fr] gap-6">
+          
+          {/* SVG Route Visualizer */}
+          <div className="bg-white rounded-xl border border-slate-100 p-4 relative flex flex-col min-h-[300px]">
+            <div className="absolute top-3 left-3 flex gap-2 z-10">
+              <span className="text-[9px] font-bold bg-[#EFF6FF] text-[#1E40AF] px-2 py-1 rounded border border-[#BFDBFE]">HCM City Grid</span>
+              <span className="text-[9px] font-bold bg-[#F3F4F6] text-[#374151] px-2 py-1 rounded">Scale: 1 : 12,000</span>
+            </div>
+
+            <div className="flex-1 w-full relative h-[360px] overflow-hidden">
+              <svg viewBox="0 0 520 400" className="w-full h-full select-none" style={{ background: '#f8fafc' }}>
+                <defs>
+                  <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
+                    <path d="M 30 0 L 0 0 0 30" fill="none" stroke="#e2e8f0" strokeWidth="0.5" />
+                  </pattern>
+                  <marker id="arrow" viewBox="0 0 10 10" refX="22" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 1 L 10 5 L 0 9 z" fill="#4f46e5" />
+                  </marker>
+                </defs>
+                <rect width="100%" height="100%" fill="url(#grid)" rx="8" />
+
+                <text x="30" y="380" className="fill-slate-300 text-[10px] font-mono font-bold tracking-widest">D3 ZONE</text>
+                <text x="400" y="40" className="fill-slate-300 text-[10px] font-mono font-bold tracking-widest">D1 THEATER</text>
+                <text x="440" y="360" className="fill-slate-300 text-[10px] font-mono font-bold tracking-widest">BEN NGHE</text>
+                <line x1="180" y1="0" x2="180" y2="400" stroke="#cbd5e1" strokeWidth="1" strokeDasharray="3 3" />
+                <line x1="360" y1="0" x2="360" y2="400" stroke="#cbd5e1" strokeWidth="1" strokeDasharray="3 3" />
+
+                {/* Connections */}
+                {points.length > 1 && points.map((p, idx) => {
+                  if (idx === points.length - 1) return null;
+                  const next = points[idx + 1];
+                  const isHighlighted = activeSegment === idx || selectedId === p.id || selectedId === next.id;
+                  return (
+                    <g key={`leg-${idx}`}>
+                      <line
+                        x1={p.x}
+                        y1={p.y}
+                        x2={next.x}
+                        y2={next.y}
+                        stroke={isHighlighted ? "#10b981" : "#4f46e5"}
+                        strokeWidth={isHighlighted ? "4.5" : "2.5"}
+                        strokeDasharray={isHighlighted ? "none" : "5 3"}
+                        className="transition-all duration-300 cursor-pointer text-indigo-700"
+                        markerEnd="url(#arrow)"
+                        onClick={() => {
+                          setActiveSegment(idx);
+                          onSelectId(p.id);
+                        }}
+                      />
+                      <g 
+                        transform={`translate(${(p.x + next.x)/2}, ${(p.y + next.y)/2})`}
+                        className="cursor-pointer"
+                        onClick={() => {
+                          setActiveSegment(idx);
+                          onSelectId(p.id);
+                        }}
+                      >
+                        <circle r="12" fill="white" stroke={isHighlighted ? "#10b981" : "#818cf8"} strokeWidth="1.5" className="shadow-sm" />
+                        <text y="3" textAnchor="middle" className="fill-slate-500 font-bold text-[8px] font-sans">🚗</text>
+                      </g>
+                    </g>
+                  );
+                })}
+
+                {/* Markers */}
+                {points.map((p) => {
+                  const isSelected = selectedId === p.id;
+                  return (
+                    <g 
+                      key={`marker-${p.id}`}
+                      transform={`translate(${p.x}, ${p.y})`}
+                      className="cursor-pointer group"
+                      onClick={() => {
+                        onSelectId(isSelected ? null : p.id);
+                        setActiveSegment(null);
+                      }}
+                    >
+                      <circle 
+                        r="18" 
+                        fill={isSelected ? '#10b981' : '#4f46e5'} 
+                        className="shadow-md transition-all duration-300 group-hover:scale-110" 
+                        stroke="#fff" 
+                        strokeWidth="2.5" 
+                      />
+                      <text 
+                        fill="#fff" 
+                        textAnchor="middle" 
+                        y="4" 
+                        className="font-black text-[13px] font-sans"
+                      >
+                        {p.index}
+                      </text>
+                      <text 
+                        y="-24" 
+                        textAnchor="middle" 
+                        className={`text-[9.5px] font-black tracking-tight fill-slate-700 pointer-events-none transition-all ${
+                          isSelected ? 'font-black scale-105' : 'opacity-75 group-hover:opacity-100'
+                        }`}
+                      >
+                        {p.name.length > 15 ? `${p.name.slice(0, 13)}...` : p.name}
+                      </text>
+                    </g>
+                  );
+                })}
+              </svg>
+
+              {/* Detail float box */}
+              <AnimatePresence>
+                {selectedPlace && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 15 }}
+                    className="absolute bottom-3 left-3 right-3 bg-white/95 backdrop-blur-md p-4 rounded-xl border border-slate-200/50 shadow-xl flex items-start gap-3 z-30"
+                  >
+                    <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 shrink-0 font-bold text-sm">
+                      #{points.find(p => p.id === selectedId)?.index}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 justify-between">
+                        <h4 className="font-extrabold text-xs text-slate-800 truncate select-text">{selectedPlace.name}</h4>
+                        <span className="text-[9px] font-bold font-mono text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">
+                          {selectedPlace.category}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1 font-bold">
+                        ⏱️ PROGRAMMED ARRIVAL: {formatTimeTo12h(selectedPlace.time)}
+                      </p>
+                      <p className="text-[10.5px] text-slate-500 truncate mt-0.5 select-text">{selectedPlace.address || 'District ' + selectedPlace.district}</p>
+                    </div>
+                    <button 
+                      onClick={() => onSelectId(null)}
+                      className="text-slate-300 hover:text-slate-500 text-sm font-bold p-1"
+                    >
+                      ×
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </div>
+
+          {/* List panel */}
+          <div className="space-y-4 font-sans">
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-3">
+              <h4 className="text-[10px] font-extrabold text-slate-400 tracking-wider uppercase">Sequence Planner</h4>
+              
+              <div className="space-y-2.5 max-h-[240px] overflow-y-auto no-scrollbar pr-1">
+                {points.map((p) => (
+                  <div 
+                    key={`point-list-${p.id}`}
+                    onClick={() => onSelectId(selectedId === p.id ? null : p.id)}
+                    className={`p-2 py-2.5 rounded-lg border text-xs cursor-pointer transition-colors flex items-center gap-3 ${
+                      selectedId === p.id 
+                        ? 'bg-[#ECFDF5] border-[#A7F3D0] text-emerald-900' 
+                        : 'bg-white border-slate-100 hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <span className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0 ${
+                      selectedId === p.id 
+                        ? 'bg-emerald-600 text-white' 
+                        : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {p.index}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-bold truncate leading-tight">{p.name}</p>
+                      <p className="text-[9.5px] opacity-75">{formatTimeTo12h(p.time)} • {p.district}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Estimated segments */}
+            {segments.length > 0 && (
+              <div className="bg-[#EEF2FF] p-4 rounded-xl border border-[#C7D2FE]/40 space-y-3">
+                <div className="flex items-center gap-1.5 text-indigo-900">
+                  <Car className="w-4 h-4 text-indigo-600" />
+                  <span className="text-[11px] font-extrabold uppercase tracking-wide">Transit & Costs</span>
+                </div>
+
+                <div className="space-y-2.5 text-[11px] text-indigo-950/80 max-h-[120px] overflow-y-auto no-scrollbar pr-1">
+                  {segments.map((seg, idx) => (
+                    <div 
+                      key={`seq-${idx}`}
+                      onMouseEnter={() => setActiveSegment(idx)}
+                      onMouseLeave={() => setActiveSegment(null)}
+                      className={`flex justify-between items-center rounded-md p-1.5 py-1 select-none transition-colors ${
+                        activeSegment === idx ? 'bg-indigo-100/60' : ''
+                      }`}
+                    >
+                      <span className="font-medium truncate max-w-[120px]">
+                        Stops {idx+1} → {idx+2}
+                      </span>
+                      <span className="font-bold font-mono text-[10px]">
+                        {seg.distance}km (~{seg.fare}đ)
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="pt-2 border-t border-indigo-200/60 flex items-center justify-between text-indigo-900">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wide">Grab Estimate</span>
+                  <span className="font-extrabold font-mono text-xs">
+                    ~{(segments.reduce((acc, current) => acc + parseInt(current.fare.replace(/,/g, '')), 0)).toLocaleString()} VND
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function PlaceAutocomplete({ onPlaceSelect }: { onPlaceSelect: (place: google.maps.places.Place) => void }) {
@@ -609,18 +1035,28 @@ export default function App() {
     const savedPlaces = localStorage.getItem('saigon_places');
     if (savedPlaces) {
       const parsed = JSON.parse(savedPlaces);
-      // Migration: ensure addresses are recovered from INITIAL_PLACES if missing in saved data
+      // Migration: ensure coordinates and addresses are recovered or filled
       return parsed.map((p: Place) => {
-        if (!p.address) {
-          const initial = INITIAL_PLACES.find(ip => ip.name === p.name);
-          if (initial) return { ...p, address: initial.address };
+        let updated = { ...p };
+        const initial = INITIAL_PLACES.find(ip => ip.name === p.name) || RECOMMENDED_PLACES.find(rp => rp.name === p.name);
+        if (initial) {
+          if (!updated.address) updated.address = initial.address;
+          if (updated.lat === undefined) updated.lat = initial.lat;
+          if (updated.lng === undefined) updated.lng = initial.lng;
         }
-        return p;
+        if (updated.lat === undefined || updated.lng === undefined) {
+          const coords = DISTRICT_COORDS[p.district] || DISTRICT_COORDS['D1'];
+          updated.lat = coords.lat + (Math.random() - 0.5) * 0.006;
+          updated.lng = coords.lng + (Math.random() - 0.5) * 0.006;
+        }
+        return updated;
       });
     }
     return INITIAL_PLACES;
   });
   const [activeTab, setActiveTab] = useState<Day>('Day 1');
+  const [scheduleMode, setScheduleMode] = useState<'list' | 'map'>('list');
+  const [selectedMapPlaceId, setSelectedMapPlaceId] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activePlace, setActivePlace] = useState<Place | null>(null);
   
@@ -762,6 +1198,21 @@ export default function App() {
       else if (address.includes('Thủ Đức')) district = 'Thu Duc';
     }
 
+    let lat: number | undefined;
+    let lng: number | undefined;
+
+    if (selectedPlace && selectedPlace.location) {
+      const loc = selectedPlace.location;
+      lat = typeof loc.lat === 'function' ? (loc.lat as any)() : loc.lat;
+      lng = typeof loc.lng === 'function' ? (loc.lng as any)() : loc.lng;
+    }
+
+    if (lat === undefined || lng === undefined) {
+      const coords = DISTRICT_COORDS[district] || DISTRICT_COORDS['D1'];
+      lat = coords.lat + (Math.random() - 0.5) * 0.006;
+      lng = coords.lng + (Math.random() - 0.5) * 0.006;
+    }
+
     const newPlace: Place = {
       id: Math.random().toString(36).substr(2, 9),
       name: selectedPlace 
@@ -772,6 +1223,8 @@ export default function App() {
       district: district,
       category: category,
       day: undefined,
+      lat,
+      lng
     };
     setPlaces(prev => [...prev, newPlace]);
     setNewName('');
@@ -1034,12 +1487,17 @@ export default function App() {
                                         const databaseNames = new Set(prev.map(p => p.name.toLowerCase().replace(/\s+/g, ' ').trim()));
                                         const trulyNewPlaces = visibleSuggestions
                                           .filter(s => !databaseNames.has(s.name.toLowerCase().replace(/\s+/g, ' ').trim()))
-                                          .map(p => ({
-                                            ...p,
-                                            id: Math.random().toString(36).substr(2, 9),
-                                            day: undefined,
-                                            time: undefined
-                                          }));
+                                          .map(p => {
+                                            const coords = DISTRICT_COORDS[p.district] || DISTRICT_COORDS['D1'];
+                                            return {
+                                              ...p,
+                                              id: Math.random().toString(36).substr(2, 9),
+                                              day: undefined,
+                                              time: undefined,
+                                              lat: p.lat !== undefined ? p.lat : (coords.lat + (Math.random() - 0.5) * 0.006),
+                                              lng: p.lng !== undefined ? p.lng : (coords.lng + (Math.random() - 0.5) * 0.006)
+                                            };
+                                          });
                                         return [...prev, ...trulyNewPlaces];
                                       });
                                       setIsSuggestedMode(false);
@@ -1094,11 +1552,14 @@ export default function App() {
                                             const isDuplicate = prev.some(p => p.name.toLowerCase().replace(/\s+/g, ' ').trim() === rec.name.toLowerCase().replace(/\s+/g, ' ').trim());
                                             if (isDuplicate) return prev;
                                             
+                                            const coords = DISTRICT_COORDS[rec.district] || DISTRICT_COORDS['D1'];
                                             const newPlace: Place = {
                                               ...rec,
                                               id: Math.random().toString(36).substr(2, 9),
                                               day: undefined,
-                                              time: undefined
+                                              time: undefined,
+                                              lat: rec.lat !== undefined ? rec.lat : (coords.lat + (Math.random() - 0.5) * 0.006),
+                                              lng: rec.lng !== undefined ? rec.lng : (coords.lng + (Math.random() - 0.5) * 0.006)
                                             };
                                             return [...prev, newPlace];
                                           });
@@ -1245,7 +1706,38 @@ export default function App() {
               className={`section-card min-h-[400px] p-6 flex flex-col gap-6 transition-all ${isOverChecklist ? 'ring-2 ring-ink ring-offset-2' : ''}`}
               ref={setChecklistRef}
             >
-              <h2 className="text-sm font-bold text-slate-500 uppercase tracking-widest">Travel Schedule</h2>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-3">
+                <h2 className="text-sm font-bold text-slate-500 uppercase tracking-widest">Travel Schedule</h2>
+                
+                {/* Mode Toggle Selector */}
+                <div className="flex bg-slate-100 p-0.5 rounded-lg text-xs font-bold font-sans self-start sm:self-auto shrink-0 select-none">
+                  <button 
+                    onClick={() => setScheduleMode('list')}
+                    className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-all ${
+                      scheduleMode === 'list' 
+                        ? 'bg-white text-slate-900 shadow-sm' 
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <span>📋 List View</span>
+                  </button>
+                  <button 
+                    onClick={() => setScheduleMode('map')}
+                    className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-all ${
+                      scheduleMode === 'map' 
+                        ? 'bg-white text-slate-900 shadow-sm' 
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <span>🗺️ Route Map</span>
+                    {filteredPlaces.length > 0 && (
+                      <span className="bg-indigo-600 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold">
+                        {filteredPlaces.length}
+                      </span>
+                    )}
+                  </button>
+                </div>
+              </div>
               
               <div className="flex bg-slate-100 p-1 rounded-xl overflow-x-auto no-scrollbar">
                 {DAYS.map((day) => (
@@ -1258,40 +1750,58 @@ export default function App() {
                 ))}
               </div>
 
-              <div className="flex-1 overflow-y-auto pr-2 no-scrollbar">
-                <SortableContext 
-                  items={filteredPlaces.map(p => `itinerary-${p.id}`)}
-                  strategy={verticalListSortingStrategy}
-                >
-                  <AnimatePresence mode="wait">
-                    <motion.div 
-                      key={activeTab}
-                      initial={{ opacity: 0, y: 5 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -5 }}
-                      className="space-y-4"
-                    >
-                      {filteredPlaces.length > 0 ? filteredPlaces.map((place) => (
-                        <DraggableItineraryItem 
-                          key={place.id}
-                          place={place}
-                          updatePlaceTime={updatePlaceTime}
-                          deletePlace={deletePlace}
-                          toggleExpand={toggleExpand}
-                        />
-                      )) : (
-                        <div className="h-40 flex flex-col items-center justify-center text-slate-300 italic text-sm text-center gap-2">
-                          <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center">
-                            <MapPin className="w-6 h-6" />
+              {scheduleMode === 'list' ? (
+                <div className="flex-1 overflow-y-auto pr-2 no-scrollbar">
+                  <SortableContext 
+                    items={filteredPlaces.map(p => `itinerary-${p.id}`)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <AnimatePresence mode="wait">
+                      <motion.div 
+                        key={activeTab}
+                        initial={{ opacity: 0, y: 5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -5 }}
+                        className="space-y-4"
+                      >
+                        {filteredPlaces.length > 0 ? filteredPlaces.map((place) => (
+                          <DraggableItineraryItem 
+                            key={place.id}
+                            place={place}
+                            updatePlaceTime={updatePlaceTime}
+                            deletePlace={deletePlace}
+                            toggleExpand={toggleExpand}
+                          />
+                        )) : (
+                          <div className="h-40 flex flex-col items-center justify-center text-slate-300 italic text-sm text-center gap-2">
+                            <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center">
+                              <MapPin className="w-6 h-6" />
+                            </div>
+                            <p>Nothing planned for {activeTab}</p>
+                            <p className="text-[10px] uppercase font-bold tracking-widest mt-2 px-10">Drag from Database into here or onto tabs to schedule</p>
                           </div>
-                          <p>Nothing planned for {activeTab}</p>
-                          <p className="text-[10px] uppercase font-bold tracking-widest mt-2 px-10">Drag from Database into here or onto tabs to schedule</p>
-                        </div>
-                      )}
-                    </motion.div>
-                  </AnimatePresence>
-                </SortableContext>
-              </div>
+                        )}
+                      </motion.div>
+                    </AnimatePresence>
+                  </SortableContext>
+                </div>
+              ) : (
+                <div className="flex-1 overflow-visible">
+                  {hasValidKey ? (
+                    <RealGoogleMap 
+                      places={filteredPlaces} 
+                      selectedId={selectedMapPlaceId} 
+                      onSelectId={setSelectedMapPlaceId} 
+                    />
+                  ) : (
+                    <MockInteractiveMap 
+                      places={filteredPlaces} 
+                      selectedId={selectedMapPlaceId} 
+                      onSelectId={setSelectedMapPlaceId} 
+                    />
+                  )}
+                </div>
+              )}
             </section>
           </div>
 
