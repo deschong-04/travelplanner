@@ -19,7 +19,12 @@ import {
   Compass,
   Navigation,
   Car,
-  MoreHorizontal
+  MoreHorizontal,
+  Copy,
+  Check,
+  Users,
+  Edit2,
+  ArrowRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { APIProvider, useMapsLibrary, Map, AdvancedMarker, Pin, InfoWindow, useMap } from '@vis.gl/react-google-maps';
@@ -1263,6 +1268,111 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
 
+  // --- Collaborative Trip ID & Presence State ---
+  const [tripId, setTripId] = useState<string>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlTripId = params.get('tripId') || params.get('trip');
+    if (urlTripId && /^[a-zA-Z0-9_\-]+$/.test(urlTripId)) {
+      localStorage.setItem('saigon_trip_id', urlTripId);
+      return urlTripId;
+    }
+    const saved = localStorage.getItem('saigon_trip_id');
+    if (saved && /^[a-zA-Z0-9_\-]+$/.test(saved)) {
+      return saved;
+    }
+    const newId = 'SG-' + Math.random().toString(36).substr(2, 4).toUpperCase();
+    localStorage.setItem('saigon_trip_id', newId);
+    return newId;
+  });
+
+  const [guestName, setGuestName] = useState<string>(() => {
+    const saved = localStorage.getItem('saigon_guest_name');
+    if (saved && saved.trim()) return saved.trim();
+    const names = ['Saigon Explorer', 'Enthusiast', 'Pho Lover', 'District Adventurer', 'Nomad Scooterist'];
+    const chosen = names[Math.floor(Math.random() * names.length)] + '-' + Math.floor(100 + Math.random() * 900);
+    localStorage.setItem('saigon_guest_name', chosen);
+    return chosen;
+  });
+
+  const [isEditingGuestName, setIsEditingGuestName] = useState(false);
+  const [collaborators, setCollaborators] = useState<any[]>([]);
+  const [joiningCode, setJoiningCode] = useState('');
+  const [copySuccess, setCopySuccess] = useState(false);
+
+  const clientId = useRef(Math.random().toString(36).substr(2, 9)).current;
+
+  const activeDisplayName = currentUser ? (currentUser.displayName || currentUser.email || 'Explorer') : guestName;
+  const activePhotoURL = currentUser ? currentUser.photoURL : null;
+
+  // Synchronize dynamic tripId parameter into query string
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('tripId') !== tripId) {
+      params.set('tripId', tripId);
+      const newUrl = `${window.location.pathname}?${params.toString()}`;
+      window.history.replaceState({ path: newUrl }, '', newUrl);
+    }
+  }, [tripId]);
+
+  // Subscribe and write to real-time presence collection
+  useEffect(() => {
+    if (!tripId) return;
+
+    const presenceRef = doc(db, 'trips', tripId, 'presence', clientId);
+    const updatePresence = async () => {
+      try {
+        await setDoc(presenceRef, {
+          id: clientId,
+          name: activeDisplayName,
+          avatar: activePhotoURL || '',
+          activeAt: new Date().toISOString()
+        });
+      } catch (err) {
+        console.warn("Failed to update active presence doc", err);
+      }
+    };
+
+    updatePresence();
+
+    const presenceColl = collection(db, 'trips', tripId, 'presence');
+    const unsubscribe = onSnapshot(presenceColl, (snap) => {
+      const list: any[] = [];
+      const now = Date.now();
+      snap.forEach((doc) => {
+        const data = doc.data();
+        const activeTime = new Date(data.activeAt).getTime();
+        if (now - activeTime < 180000) { // active within last 3 minutes
+          list.push(data);
+        }
+      });
+      setCollaborators(list);
+    }, (error) => {
+      console.warn("Presence subscript failed:", error);
+    });
+
+    return () => {
+      unsubscribe();
+      deleteDoc(presenceRef).catch(() => {});
+    };
+  }, [tripId, activeDisplayName, activePhotoURL]);
+
+  // Periodic visual presence heartbeat update
+  useEffect(() => {
+    if (!tripId) return;
+    const interval = setInterval(async () => {
+      try {
+        const presenceRef = doc(db, 'trips', tripId, 'presence', clientId);
+        await setDoc(presenceRef, {
+          id: clientId,
+          name: activeDisplayName,
+          avatar: activePhotoURL || '',
+          activeAt: new Date().toISOString()
+        }, { merge: true });
+      } catch (err) {}
+    }, 20000);
+    return () => clearInterval(interval);
+  }, [tripId, activeDisplayName, activePhotoURL]);
+
   // Authenticate user changes
   useEffect(() => {
     setIsAuthLoading(true);
@@ -1461,9 +1571,9 @@ export default function App() {
 
   // Cloud Sync: Subscribe to Trip Metadata on Firestore
   useEffect(() => {
-    if (!currentUser) return;
+    if (!tripId) return;
 
-    const tripRef = doc(db, 'trips', currentUser.uid);
+    const tripRef = doc(db, 'trips', tripId);
     const unsubscribe = onSnapshot(tripRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -1476,25 +1586,25 @@ export default function App() {
             plannerName,
             arrivalDate,
             departureDate,
-            ownerId: currentUser.uid,
+            ownerId: currentUser?.uid || 'guest',
             updatedAt: new Date().toISOString()
           });
         } catch (err) {
-          handleFirestoreError(err, OperationType.WRITE, `trips/${currentUser.uid}`);
+          handleFirestoreError(err, OperationType.WRITE, `trips/${tripId}`);
         }
       }
     }, (error) => {
-      handleFirestoreError(error, OperationType.GET, `trips/${currentUser.uid}`);
+      handleFirestoreError(error, OperationType.GET, `trips/${tripId}`);
     });
 
     return () => unsubscribe();
-  }, [currentUser]);
+  }, [tripId]);
 
-  // Cloud Sync: Subscribe to Place Documents inside user's trip subcollection
+  // Cloud Sync: Subscribe to Place Documents inside the shared trip subcollection
   useEffect(() => {
-    if (!currentUser) return;
+    if (!tripId) return;
 
-    const placesRef = collection(db, 'trips', currentUser.uid, 'places');
+    const placesRef = collection(db, 'trips', tripId, 'places');
     const unsubscribe = onSnapshot(placesRef, async (querySnap) => {
       const fbPlaces: Place[] = [];
       querySnap.forEach((doc) => {
@@ -1508,43 +1618,43 @@ export default function App() {
         if (places.length > 0) {
           const batch = writeBatch(db);
           places.forEach((p) => {
-            const docRef = doc(db, 'trips', currentUser.uid, 'places', p.id);
+            const docRef = doc(db, 'trips', tripId, 'places', p.id);
             batch.set(docRef, p);
           });
           try {
             await batch.commit();
           } catch (err) {
-            handleFirestoreError(err, OperationType.WRITE, `trips/${currentUser.uid}/places`);
+            handleFirestoreError(err, OperationType.WRITE, `trips/${tripId}/places`);
           }
         }
       }
     }, (error) => {
-      handleFirestoreError(error, OperationType.GET, `trips/${currentUser.uid}/places`);
+      handleFirestoreError(error, OperationType.GET, `trips/${tripId}/places`);
     });
 
     return () => unsubscribe();
-  }, [currentUser]);
+  }, [tripId]);
 
   // Cloud Sync: Push user keystrokes / edits for trip info with 1s debounce
   useEffect(() => {
-    if (!currentUser) return;
+    if (!tripId) return;
 
     const timeout = setTimeout(async () => {
       try {
-        await setDoc(doc(db, 'trips', currentUser.uid), {
+        await setDoc(doc(db, 'trips', tripId), {
           plannerName,
           arrivalDate,
           departureDate,
-          ownerId: currentUser.uid,
+          ownerId: currentUser?.uid || 'guest',
           updatedAt: new Date().toISOString()
         });
       } catch (err) {
-        handleFirestoreError(err, OperationType.WRITE, `trips/${currentUser.uid}`);
+        handleFirestoreError(err, OperationType.WRITE, `trips/${tripId}`);
       }
     }, 1000);
 
     return () => clearTimeout(timeout);
-  }, [plannerName, arrivalDate, departureDate, currentUser]);
+  }, [plannerName, arrivalDate, departureDate, tripId]);
 
   // Handlers
   const addPlace = (selectedPlace?: google.maps.places.Place) => {
@@ -1606,7 +1716,7 @@ export default function App() {
     setNewName('');
     setNewAddress('');
 
-    if (currentUser) {
+    if (tripId) {
       // clean any undefined properties for Firestore compatibility
       const cleanPlace = { ...newPlace };
       if (cleanPlace.address === undefined) delete cleanPlace.address;
@@ -1616,16 +1726,16 @@ export default function App() {
       if (cleanPlace.lat === undefined) delete cleanPlace.lat;
       if (cleanPlace.lng === undefined) delete cleanPlace.lng;
 
-      setDoc(doc(db, 'trips', currentUser.uid, 'places', newPlace.id), cleanPlace)
-        .catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${currentUser.uid}/places/${newPlace.id}`));
+      setDoc(doc(db, 'trips', tripId, 'places', newPlace.id), cleanPlace)
+        .catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${tripId}/places/${newPlace.id}`));
     }
   };
 
   const deletePlace = (id: string) => {
     setPlaces(prev => prev.filter(p => p.id !== id));
-    if (currentUser) {
-      deleteDoc(doc(db, 'trips', currentUser.uid, 'places', id))
-        .catch(err => handleFirestoreError(err, OperationType.DELETE, `trips/${currentUser.uid}/places/${id}`));
+    if (tripId) {
+      deleteDoc(doc(db, 'trips', tripId, 'places', id))
+        .catch(err => handleFirestoreError(err, OperationType.DELETE, `trips/${tripId}/places/${id}`));
     }
   };
 
@@ -1637,10 +1747,10 @@ export default function App() {
           delete updated.day;
           delete updated.time;
           
-          if (currentUser) {
+          if (tripId) {
             // Write to Firestore to persist clearing
-            setDoc(doc(db, 'trips', currentUser.uid, 'places', p.id), updated)
-              .catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${currentUser.uid}/places/${p.id}`));
+            setDoc(doc(db, 'trips', tripId, 'places', p.id), updated)
+              .catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${tripId}/places/${p.id}`));
           }
           return updated;
         }
@@ -1652,7 +1762,7 @@ export default function App() {
   const toggleExpand = (id: string) => {
     setPlaces(prev => {
       const updated = prev.map(p => p.id === id ? { ...p, expanded: !p.expanded } : p);
-      if (currentUser) {
+      if (tripId) {
         const target = updated.find(p => p.id === id);
         if (target) {
           const cleanTarget = { ...target };
@@ -1662,8 +1772,8 @@ export default function App() {
           if (cleanTarget.expanded === undefined) delete cleanTarget.expanded;
           if (cleanTarget.lat === undefined) delete cleanTarget.lat;
           if (cleanTarget.lng === undefined) delete cleanTarget.lng;
-          setDoc(doc(db, 'trips', currentUser.uid, 'places', id), cleanTarget)
-            .catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${currentUser.uid}/places/${id}`));
+          setDoc(doc(db, 'trips', tripId, 'places', id), cleanTarget)
+            .catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${tripId}/places/${id}`));
         }
       }
       return updated;
@@ -1673,7 +1783,7 @@ export default function App() {
   const updatePlaceDay = (id: string, day?: Day) => {
     setPlaces(prev => {
       const updated = prev.map(p => p.id === id ? { ...p, day } : p);
-      if (currentUser) {
+      if (tripId) {
         const target = updated.find(p => p.id === id);
         if (target) {
           const cleanTarget = { ...target };
@@ -1687,8 +1797,8 @@ export default function App() {
           if (cleanTarget.expanded === undefined) delete cleanTarget.expanded;
           if (cleanTarget.lat === undefined) delete cleanTarget.lat;
           if (cleanTarget.lng === undefined) delete cleanTarget.lng;
-          setDoc(doc(db, 'trips', currentUser.uid, 'places', id), cleanTarget)
-            .catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${currentUser.uid}/places/${id}`));
+          setDoc(doc(db, 'trips', tripId, 'places', id), cleanTarget)
+            .catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${tripId}/places/${id}`));
         }
       }
       return updated;
@@ -1698,7 +1808,7 @@ export default function App() {
   const updatePlaceTime = (id: string, time: string) => {
     setPlaces(prev => {
       const updated = prev.map(p => p.id === id ? { ...p, time } : p);
-      if (currentUser) {
+      if (tripId) {
         const target = updated.find(p => p.id === id);
         if (target) {
           const cleanTarget = { ...target };
@@ -1708,8 +1818,8 @@ export default function App() {
           if (cleanTarget.expanded === undefined) delete cleanTarget.expanded;
           if (cleanTarget.lat === undefined) delete cleanTarget.lat;
           if (cleanTarget.lng === undefined) delete cleanTarget.lng;
-          setDoc(doc(db, 'trips', currentUser.uid, 'places', id), cleanTarget)
-            .catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${currentUser.uid}/places/${id}`));
+          setDoc(doc(db, 'trips', tripId, 'places', id), cleanTarget)
+            .catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${tripId}/places/${id}`));
         }
       }
       return updated;
@@ -1916,6 +2026,155 @@ export default function App() {
                 </div>
               </div>
             </header>
+
+            {/* Real-time Collaboration Hub Card */}
+            <section className="bg-white border border-slate-200/80 rounded-2xl p-4 md:p-5 shadow-sm space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 shrink-0">
+                    <Users className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Collective Session</h3>
+                    <p className="text-[10px] text-slate-400 font-medium">Changes sync immediately with all online collaborators</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Room Code:</span>
+                  <div className="flex items-center gap-1 bg-slate-900 text-slate-100 rounded-xl pl-3 pr-1.5 py-1 text-xs font-mono font-bold shadow-inner">
+                    <span>{tripId}</span>
+                    <button
+                      onClick={() => {
+                        const copyUrl = `${window.location.origin}${window.location.pathname}?tripId=${tripId}`;
+                        navigator.clipboard.writeText(copyUrl).then(() => {
+                          setCopySuccess(true);
+                          setTimeout(() => setCopySuccess(false), 2000);
+                        });
+                      }}
+                      className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer"
+                      title="Copy Invite Link"
+                    >
+                      {copySuccess ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid md:grid-cols-[1fr_240px] gap-4 pt-3 border-t border-slate-100 items-start">
+                {/* Active Collaborators Presence and Nickname Manager */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Active Now ({collaborators.length}):</span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {collaborators.map((collab) => {
+                        const init = collab.name ? collab.name.charAt(0).toUpperCase() : '?';
+                        const isMe = collab.id === clientId;
+                        return (
+                          <div
+                            key={collab.id}
+                            className={`w-7 h-7 rounded-full border-2 ${isMe ? 'border-indigo-500 ring-2 ring-indigo-100' : 'border-white'} flex items-center justify-center text-[10px] font-bold text-white shrink-0 relative group cursor-help`}
+                            style={{ 
+                              backgroundColor: collab.id === clientId ? '#4F46E5' : `hsl(${(collab.id.charCodeAt(0) * 40) % 360}, 65%, 50%)`
+                            }}
+                          >
+                            {collab.avatar ? (
+                              <img 
+                                src={collab.avatar} 
+                                alt={collab.name} 
+                                className="w-full h-full rounded-full object-cover" 
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <span>{init}</span>
+                            )}
+                            
+                            {/* Simple inline tooltip displaying name of collaborator */}
+                            <span className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-900/90 backdrop-blur-sm text-white text-[9px] font-bold px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 shadow-md">
+                              {collab.name} {isMe ? '(You)' : ''}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Guest nickname editing section */}
+                  {!currentUser && (
+                    <div className="flex items-center gap-2 text-xs text-slate-600 bg-slate-50/80 px-3 py-1.5 rounded-xl border border-slate-100 max-w-sm">
+                      <span className="shrink-0 text-[10px] font-bold text-slate-400 uppercase">My Name:</span>
+                      {isEditingGuestName ? (
+                        <div className="flex items-center gap-1.5 flex-1 col-span-2">
+                          <input
+                            type="text"
+                            value={guestName}
+                            onChange={(e) => {
+                              setGuestName(e.target.value);
+                              localStorage.setItem('saigon_guest_name', e.target.value);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') setIsEditingGuestName(false);
+                            }}
+                            className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-slate-800 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full"
+                            maxLength={30}
+                            autoFocus
+                          />
+                          <button
+                            onClick={() => setIsEditingGuestName(false)}
+                            className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 px-2 bg-white hover:bg-slate-100 rounded-lg border border-slate-200 py-1"
+                          >
+                            Save
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-slate-800">{guestName}</span>
+                          <button
+                            onClick={() => setIsEditingGuestName(true)}
+                            className="text-slate-400 hover:text-indigo-600 transition-colors p-0.5 cursor-pointer"
+                            title="Edit Nickname"
+                          >
+                            <Edit2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Direct Room Join Form */}
+                <div className="flex flex-col gap-1.5 bg-slate-50 px-3 py-2.5 rounded-xl border border-slate-100">
+                  <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-none">Join a Different Trip</label>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      if (!joiningCode.trim()) return;
+                      const sanitized = joiningCode.trim().toUpperCase().replace(/[^A-Z0-9_\-]/gi, '');
+                      if (sanitized) {
+                        setTripId(sanitized);
+                        localStorage.setItem('saigon_trip_id', sanitized);
+                        setJoiningCode('');
+                      }
+                    }}
+                    className="flex items-center gap-1 mt-1"
+                  >
+                    <input
+                      type="text"
+                      placeholder="Room Code..."
+                      value={joiningCode}
+                      onChange={(e) => setJoiningCode(e.target.value)}
+                      className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-mono font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-500 flex-1 min-w-0"
+                    />
+                    <button
+                      type="submit"
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg p-1.5 text-xs font-bold transition-all cursor-pointer flex items-center justify-center shrink-0"
+                    >
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </section>
 
             {/* Database Section */}
             <section 

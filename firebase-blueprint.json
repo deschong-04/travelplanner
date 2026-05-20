@@ -11,7 +11,7 @@
         "updatedAt": { "type": "string" },
         "ownerId": { "type": "string" }
       },
-      "required": ["plannerName", "arrivalDate", "departureDate", "ownerId"]
+      "required": ["plannerName", "arrivalDate", "departureDate"]
     },
     "Place": {
       "title": "Itinerary Stop",
@@ -30,16 +30,32 @@
         "lng": { "type": "number" }
       },
       "required": ["id", "name", "district", "category"]
+    },
+    "Presence": {
+      "title": "Collaborator Presence",
+      "description": "Active collaborator session info",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "avatar": { "type": "string" },
+        "activeAt": { "type": "string" }
+      },
+      "required": ["id", "name", "activeAt"]
     }
   },
   "firestore": {
-    "/trips/{userId}": {
+    "/trips/{tripId}": {
       "schema": "Trip",
-      "description": "Stores user trip metadata"
+      "description": "Stores trip metadata"
     },
-    "/trips/{userId}/places/{placeId}": {
+    "/trips/{tripId}/places/{placeId}": {
       "schema": "Place",
-      "description": "Stores places/stops for the user's trip"
+      "description": "Stores places/stops for the collaborative trip"
+    },
+    "/trips/{tripId}/presence/{presenceId}": {
+      "schema": "Presence",
+      "description": "Active collaborators in this trip room"
     }
   }
 }
