@@ -296,6 +296,7 @@ export default function Dashboard({
           <AnimatePresence mode="popLayout">
             {filteredTrips.length === 0 ? (
               <motion.div
+                key="empty-state"
                 initial={{ opacity: 0, scale: 0.98 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.98 }}
@@ -322,21 +323,23 @@ export default function Dashboard({
               </motion.div>
             ) : (
               <motion.div 
-                layout
+                key="grid-state"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
                 className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6"
               >
                 {filteredTrips.map((trip) => {
                   const theme = getDestinationTheme(trip.destination);
                   return (
                     <motion.div
-                      layout
                       key={trip.id}
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.95 }}
-                      whileHover={{ y: -3, scale: 1.005 }}
-                      transition={{ duration: 0.2 }}
-                      className={`bg-white border ${theme.border} rounded-[24px] p-5 flex flex-col justify-between gap-5 shadow-[0_4px_15px_-4px_rgba(0,0,0,0.03)] ${theme.shadow || ''} transition-all relative overflow-hidden group`}
+                      initial={{ opacity: 0, y: 15 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 15 }}
+                      whileHover={{ y: -4 }}
+                      transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                      className={`bg-white border ${theme.border} rounded-[24px] p-5 flex flex-col justify-between gap-5 shadow-[0_4px_15px_-4px_rgba(0,0,0,0.03)] ${theme.shadow || ''} transition-all relative overflow-hidden group min-h-[180px]`}
                     >
                       {/* Subtle elegant theme color top line accent */}
                       <div className={`absolute top-0 left-0 right-0 h-1.5 ${theme.bg} border-b border-black/5`} />
