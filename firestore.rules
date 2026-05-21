@@ -21,7 +21,7 @@ service cloud.firestore {
     }
 
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
     }
 
     // Validation for Trip Entity
@@ -36,7 +36,11 @@ service cloud.firestore {
         && data.departureDate.size() <= 50
         && (!('ownerId' in data) || (data.ownerId is string && data.ownerId.size() <= 128))
         && (!('lat' in data) || data.lat is number)
-        && (!('lng' in data) || data.lng is number);
+        && (!('lng' in data) || data.lng is number)
+        && (!('baseCurrency' in data) || (data.baseCurrency is string && data.baseCurrency.size() <= 10))
+        && (!('targetCurrency' in data) || (data.targetCurrency is string && data.targetCurrency.size() <= 10))
+        && (!('conversionRate' in data) || data.conversionRate is number)
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 100));
     }
 
     // Validation for Place Entity
@@ -70,16 +74,30 @@ service cloud.firestore {
 
     // Rule for trips
     match /trips/{tripId} {
-      allow read, list: if isValidId(tripId);
+      allow get: if isValidId(tripId);
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
       allow create: if isValidId(tripId) && isValidTrip(incoming());
       allow update: if isValidId(tripId) && isValidTrip(incoming()) && (
-        incoming().diff(existing()).affectedKeys().hasOnly(['plannerName', 'destination', 'arrivalDate', 'departureDate', 'updatedAt', 'ownerId', 'lat', 'lng'])
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'plannerName', 
+          'destination', 
+          'arrivalDate', 
+          'departureDate', 
+          'updatedAt', 
+          'ownerId', 
+          'lat', 
+          'lng', 
+          'baseCurrency', 
+          'targetCurrency', 
+          'conversionRate'
+        ])
       );
       allow delete: if isValidId(tripId);
 
       // Rule for subcollection places
       match /places/{placeId} {
-        allow read: if isValidId(tripId) && isValidId(placeId);
+        allow get: if isValidId(tripId) && isValidId(placeId);
+        allow list: if isValidId(tripId);
         allow create: if isValidId(tripId) && isValidId(placeId) && isValidPlace(incoming());
         allow update: if isValidId(tripId) && isValidId(placeId) && isValidPlace(incoming());
         allow delete: if isValidId(tripId) && isValidId(placeId);
@@ -87,7 +105,8 @@ service cloud.firestore {
 
       // Rule for subcollection presence
       match /presence/{presenceId} {
-        allow read: if isValidId(tripId) && isValidId(presenceId);
+        allow get: if isValidId(tripId) && isValidId(presenceId);
+        allow list: if isValidId(tripId);
         allow create: if isValidId(tripId) && isValidId(presenceId) && isValidPresence(incoming());
         allow update: if isValidId(tripId) && isValidId(presenceId) && isValidPresence(incoming());
         allow delete: if isValidId(tripId) && isValidId(presenceId);

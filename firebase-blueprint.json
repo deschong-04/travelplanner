@@ -12,7 +12,10 @@
         "updatedAt": { "type": "string" },
         "ownerId": { "type": "string" },
         "lat": { "type": "number" },
-        "lng": { "type": "number" }
+        "lng": { "type": "number" },
+        "baseCurrency": { "type": "string" },
+        "targetCurrency": { "type": "string" },
+        "conversionRate": { "type": "number" }
       },
       "required": ["plannerName", "destination", "arrivalDate", "departureDate"]
     },

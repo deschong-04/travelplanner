@@ -53,6 +53,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { restrictToWindowEdges } from '@dnd-kit/modifiers';
 import { db, auth, googleProvider, handleFirestoreError, OperationType } from './firebase';
+import LandingPage from './components/LandingPage';
 import { 
   onAuthStateChanged, 
   signInWithPopup, 
@@ -2023,8 +2024,19 @@ export default function App() {
   return (
     <AppProvider>
       <div className="min-h-screen bg-bg text-ink font-sans selection:bg-slate-200">
-      <DndContext 
-        sensors={sensors}
+        {isAuthLoading ? (
+          <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+            <div className="text-center space-y-3">
+              <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto pb-1" />
+              <p className="text-xs font-black text-slate-400 uppercase tracking-widest animate-pulse">Initializing Planner...</p>
+            </div>
+          </div>
+        ) : !currentUser ? (
+          <LandingPage onLoginSuccess={(user) => setCurrentUser(user)} />
+        ) : (
+          <>
+            <DndContext 
+              sensors={sensors}
         collisionDetection={customCollisionDetection}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
@@ -3334,6 +3346,8 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+          </>
+        )}
     </div>
     </AppProvider>
   );
