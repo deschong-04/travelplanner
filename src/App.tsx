@@ -2529,7 +2529,23 @@ export default function App() {
                                               lng: p.lng !== undefined ? p.lng : (coords.lng + (Math.random() - 0.5) * 0.006)
                                             };
                                           });
-                                        return [...prev, ...trulyNewPlaces];
+
+                                        if (trulyNewPlaces.length > 0) {
+                                          if (tripId) {
+                                            const batch = writeBatch(db);
+                                            trulyNewPlaces.forEach((tp) => {
+                                              const cleanPlace = { ...tp };
+                                              if (cleanPlace.day === undefined) delete cleanPlace.day;
+                                              if (cleanPlace.time === undefined) delete cleanPlace.time;
+                                              if (cleanPlace.address === undefined) delete cleanPlace.address;
+                                              const docRef = doc(db, 'trips', tripId, 'places', tp.id);
+                                              batch.set(docRef, cleanPlace);
+                                            });
+                                            batch.commit().catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${tripId}/places`));
+                                          }
+                                          return [...prev, ...trulyNewPlaces];
+                                        }
+                                        return prev;
                                       });
                                       setIsSuggestedMode(false);
                                     }}
@@ -2592,6 +2608,16 @@ export default function App() {
                                               lat: rec.lat !== undefined ? rec.lat : (coords.lat + (Math.random() - 0.5) * 0.006),
                                               lng: rec.lng !== undefined ? rec.lng : (coords.lng + (Math.random() - 0.5) * 0.006)
                                             };
+
+                                            if (tripId) {
+                                              const cleanPlace = { ...newPlace };
+                                              if (cleanPlace.day === undefined) delete cleanPlace.day;
+                                              if (cleanPlace.time === undefined) delete cleanPlace.time;
+                                              if (cleanPlace.address === undefined) delete cleanPlace.address;
+                                              setDoc(doc(db, 'trips', tripId, 'places', newPlace.id), cleanPlace)
+                                                .catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${tripId}/places/${newPlace.id}`));
+                                            }
+
                                             return [...prev, newPlace];
                                           });
                                         }}

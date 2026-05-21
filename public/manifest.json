@@ -1,7 +1,7 @@
 {
-  "short_name": "Travel Planner",
-  "name": "My Travel Planner",
-  "description": "An elegant, curated travel route planner and scheduler for adventurous travelers.",
+  "short_name": "Saigon Travel",
+  "name": "Saigon Travel Master Planner",
+  "description": "A premium 4D3N travel planner for Saigon with live currency conversion and interactive master database.",
   "icons": [
     {
       "src": "/icon-512.png",
@@ -17,8 +17,8 @@
     }
   ],
   "start_url": "/",
-  "background_color": "#ffffff",
-  "theme_color": "#4f46e5",
+  "background_color": "#0f172a",
+  "theme_color": "#6366f1",
   "display": "standalone",
   "orientation": "portrait"
 }
