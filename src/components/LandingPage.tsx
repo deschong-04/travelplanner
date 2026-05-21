@@ -219,56 +219,56 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
             </p>
           </div>
 
-          {/* Key Value Pillars - Beautiful modern white bento cards */}
-          <div className="grid sm:grid-cols-2 gap-4 pt-2">
-            <div className="flex items-start gap-3 bg-white border border-slate-200/80 rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] hover:shadow-md transition-shadow group">
-              <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-650 shrink-0 border border-indigo-100 group-hover:scale-110 transition-transform">
-                <Users className="w-4.5 h-4.5 text-indigo-600" />
+            {/* Key Value Pillars - Beautiful modern white bento cards */}
+            <div className="grid sm:grid-cols-2 gap-4 pt-2">
+              <div className="flex items-start gap-3 bg-white border border-slate-200/80 rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] hover:shadow-md transition-shadow group">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-650 shrink-0 border border-indigo-100 group-hover:scale-110 transition-transform">
+                  <Users className="w-5 h-5 text-indigo-600" />
+                </div>
+                <div className="space-y-0.5">
+                  <h4 className="text-sm font-black text-slate-800">Live Multiplayer Sync</h4>
+                  <p className="text-xs text-slate-500 leading-normal font-medium">
+                    Invite friends to co-plan live across distinct devices with instant synchronization.
+                  </p>
+                </div>
               </div>
-              <div className="space-y-0.5">
-                <h4 className="text-xs font-black text-slate-800">Live Multiplayer Sync</h4>
-                <p className="text-[10.5px] text-slate-500 leading-normal font-medium">
-                  Invite friends to co-plan live across distinct devices with instant synchronization.
-                </p>
-              </div>
-            </div>
 
-            <div className="flex items-start gap-3 bg-white border border-slate-200/80 rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] hover:shadow-md transition-shadow group">
-              <div className="w-9 h-9 rounded-xl bg-pink-50 flex items-center justify-center text-pink-650 shrink-0 border border-pink-100 group-hover:scale-110 transition-transform">
-                <MapPin className="w-4.5 h-4.5 text-pink-505" />
+              <div className="flex items-start gap-3 bg-white border border-slate-200/80 rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] hover:shadow-md transition-shadow group">
+                <div className="w-10 h-10 rounded-xl bg-pink-50 flex items-center justify-center text-pink-650 shrink-0 border border-pink-100 group-hover:scale-110 transition-transform">
+                  <MapPin className="w-5 h-5 text-pink-505" />
+                </div>
+                <div className="space-y-0.5">
+                  <h4 className="text-sm font-black text-slate-800">Dynamic Stop Sequencer</h4>
+                  <p className="text-xs text-slate-500 leading-normal font-medium">
+                    Map and calculate custom paths, days, times, and travel checkpoints easily.
+                  </p>
+                </div>
               </div>
-              <div className="space-y-0.5">
-                <h4 className="text-xs font-black text-slate-800">Dynamic Stop Sequencer</h4>
-                <p className="text-[10.5px] text-slate-500 leading-normal font-medium">
-                  Map and calculate custom paths, days, times, and travel checkpoints easily.
-                </p>
-              </div>
-            </div>
 
-            <div className="flex items-start gap-3 bg-white border border-slate-200/80 rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] hover:shadow-md transition-shadow group">
-              <div className="w-9 h-9 rounded-xl bg-amber-50 flex items-center justify-center text-amber-650 shrink-0 border border-amber-100 group-hover:scale-110 transition-transform">
-                <ArrowRightLeft className="w-4.5 h-4.5 text-amber-600" />
+              <div className="flex items-start gap-3 bg-white border border-slate-200/80 rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] hover:shadow-md transition-shadow group">
+                <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-650 shrink-0 border border-amber-100 group-hover:scale-110 transition-transform">
+                  <ArrowRightLeft className="w-5 h-5 text-amber-600" />
+                </div>
+                <div className="space-y-0.5">
+                  <h4 className="text-sm font-black text-slate-800">Advanced Currencies</h4>
+                  <p className="text-xs text-slate-500 leading-normal font-medium">
+                    Calculate real-time currency exchanges and monitor global travel costs instantly.
+                  </p>
+                </div>
               </div>
-              <div className="space-y-0.5">
-                <h4 className="text-xs font-black text-slate-800">Advanced Currencies</h4>
-                <p className="text-[10.5px] text-slate-500 leading-normal font-medium">
-                  Calculate real-time currency exchanges and monitor global travel costs instantly.
-                </p>
-              </div>
-            </div>
 
-            <div className="flex items-start gap-3 bg-white border border-slate-200/80 rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] hover:shadow-md transition-shadow group">
-              <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-650 shrink-0 border border-emerald-100 group-hover:scale-110 transition-transform">
-                <Sparkles className="w-4.5 h-4.5 text-emerald-600" />
-              </div>
-              <div className="space-y-0.5">
-                <h4 className="text-xs font-black text-slate-800">Smart Gemini Guides</h4>
-                <p className="text-[10.5px] text-slate-500 leading-normal font-medium">
-                  Unlock curated summaries, food lists, and location suggestions on-demand.
-                </p>
+              <div className="flex items-start gap-3 bg-white border border-slate-200/80 rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] hover:shadow-md transition-shadow group">
+                <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-650 shrink-0 border border-emerald-100 group-hover:scale-110 transition-transform">
+                  <Sparkles className="w-5 h-5 text-emerald-600" />
+                </div>
+                <div className="space-y-0.5">
+                  <h4 className="text-sm font-black text-slate-800">Smart Gemini Guides</h4>
+                  <p className="text-xs text-slate-500 leading-normal font-medium">
+                    Unlock curated summaries, food lists, and location suggestions on-demand.
+                  </p>
+                </div>
               </div>
             </div>
-          </div>
         </div>
 
         {/* Right Side: Modern High-Contrast White Travel Form */}
@@ -363,7 +363,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
               <form onSubmit={handleSubmit} className="space-y-4 text-left">
                 {mode === 'signup' && (
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-extra-black uppercase tracking-widest text-[#4f46e5] block px-1">
+                    <label className="text-[11px] font-extra-black uppercase tracking-widest text-[#4f46e5] block px-1">
                       Display Name
                     </label>
                     <div className="relative">
@@ -374,7 +374,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                         placeholder="Rachel Green"
                         value={name}
                         onChange={(e) => setName(e.target.value)}
-                        className="bg-slate-50 border border-slate-200/90 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-slate-900 placeholder-slate-400 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-650 w-full hover:border-slate-300 transition-colors"
+                        className="bg-slate-50 border border-slate-200/90 rounded-2xl pl-10 pr-4 py-3 text-base md:text-sm text-slate-900 placeholder-slate-400 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-650 w-full hover:border-slate-300 transition-colors"
                         maxLength={40}
                       />
                     </div>
@@ -382,7 +382,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                 )}
 
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-extra-black uppercase tracking-widest text-[#4f46e5] block px-1">
+                  <label className="text-[11px] font-extra-black uppercase tracking-widest text-[#4f46e5] block px-1">
                     Email Address
                   </label>
                   <div className="relative">
@@ -393,13 +393,13 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                       placeholder="you@domain.com"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="bg-slate-50 border border-slate-200/90 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-slate-900 placeholder-slate-400 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-650 w-full hover:border-slate-300 transition-colors"
+                      className="bg-slate-50 border border-slate-200/90 rounded-2xl pl-10 pr-4 py-3 text-base md:text-sm text-slate-900 placeholder-slate-400 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-650 w-full hover:border-slate-300 transition-colors"
                     />
                   </div>
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-extra-black uppercase tracking-widest text-[#4f46e5] block px-1">
+                  <label className="text-[11px] font-extra-black uppercase tracking-widest text-[#4f46e5] block px-1">
                     Secure Password
                   </label>
                   <div className="relative">
@@ -410,7 +410,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                       placeholder="••••••••"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="bg-slate-50 border border-slate-200/90 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-slate-900 placeholder-slate-400 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-650 w-full hover:border-slate-300 transition-colors"
+                      className="bg-slate-50 border border-slate-200/90 rounded-2xl pl-10 pr-4 py-3 text-base md:text-sm text-slate-900 placeholder-slate-400 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-650 w-full hover:border-slate-300 transition-colors"
                     />
                   </div>
                 </div>
@@ -418,7 +418,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white font-black text-xs py-3 rounded-2xl transition-all cursor-pointer shadow-md shadow-indigo-600/10 hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2 mt-2 disabled:opacity-50"
+                  className="w-full bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white font-black text-sm py-3 rounded-2xl transition-all cursor-pointer shadow-md shadow-indigo-600/10 hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2 mt-2 disabled:opacity-50"
                 >
                   {loading ? (
                     <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -434,7 +434,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
               {/* Divider Splitting line */}
               <div className="flex items-center text-slate-300 gap-3 my-2 select-none">
                 <div className="h-[1px] bg-slate-200 flex-1" />
-                <span className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400 shrink-0">
+                <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 shrink-0">
                   Or Instant Connection
                 </span>
                 <div className="h-[1px] bg-slate-200 flex-1" />
@@ -442,7 +442,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
 
               {/* iOS Standalone Friendly Warning/Helper Info */}
               {isStandalone && (
-                <div className="bg-amber-50/90 text-amber-900 border border-amber-200/50 p-3.5 rounded-2xl text-[10.5px] leading-relaxed text-left font-semibold shadow-inner">
+                <div className="bg-amber-50/90 text-amber-900 border border-amber-200/50 p-3.5 rounded-2xl text-xs leading-relaxed text-left font-semibold shadow-inner">
                   <span className="inline-block mr-1">💡</span>
                   <strong>iOS Standalone Web Clip Detected</strong>:<br/>
                   Apple's custom Web Clip sandbox limits standard Google Sign-In popups/redirects.
