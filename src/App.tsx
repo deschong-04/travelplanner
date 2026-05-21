@@ -1467,6 +1467,13 @@ export default function App() {
 
   // Authenticate user changes
   useEffect(() => {
+    // Force a one-time session purge to start afresh
+    if (localStorage.getItem('db_purged_clear_session_v1') !== 'true') {
+      signOut(auth).catch(() => {});
+      localStorage.removeItem('saigon_custom_user');
+      localStorage.setItem('db_purged_clear_session_v1', 'true');
+    }
+
     setIsAuthLoading(true);
     // Retrieve redirect result if we just returned from Google sign-in redirect
     getRedirectResult(auth)
