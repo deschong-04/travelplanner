@@ -1489,13 +1489,8 @@ export default function App() {
       setUserTrips([]);
       return;
     }
-    const ownerIds = [currentUser.uid];
-    if (currentUser.uid !== 'sandbox_guest_explorer') {
-      ownerIds.push('sandbox_guest_explorer');
-    }
-    ownerIds.push('guest');
     
-    const q = query(collection(db, 'trips'), where('ownerId', 'in', ownerIds));
+    const q = query(collection(db, 'trips'), where('ownerId', '==', currentUser.uid));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const tripsList: any[] = [];
       snapshot.forEach((docSnap) => {
