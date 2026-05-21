@@ -22,8 +22,7 @@ import {
   createUserWithEmailAndPassword, 
   updateProfile,
   signInWithPopup,
-  signInWithRedirect,
-  signInAnonymously
+  signInWithRedirect
 } from 'firebase/auth';
 
 interface LandingPageProps {
@@ -50,7 +49,6 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [isSandboxLoading, setIsSandboxLoading] = useState(false);
 
   const currentHost = typeof window !== 'undefined' ? window.location.host : '';
   const isStandalone = typeof window !== 'undefined' && (
@@ -62,33 +60,6 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
     navigator.clipboard.writeText(currentHost);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleSandboxEnter = async () => {
-    setIsSandboxLoading(true);
-    setError(null);
-    try {
-      const res = await signInAnonymously(auth);
-      if (res.user) {
-        if (!res.user.displayName) {
-          try {
-            await updateProfile(res.user, { displayName: 'Guest Explorer 🎒' });
-          } catch (profileErr) {
-            console.error("Profile set failed:", profileErr);
-          }
-        }
-        onLoginSuccess({
-          ...res.user,
-          displayName: res.user.displayName || 'Guest Explorer 🎒',
-          isGuest: true
-        });
-      }
-    } catch (err: any) {
-      console.error("Anonymous sign in error:", err);
-      setError(err.message || "Failed to start guest adventure");
-    } finally {
-      setIsSandboxLoading(false);
-    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -120,12 +91,14 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
     } catch (err: any) {
       console.error("Auth helper error:", err);
       let errMsg = err.message || 'Authentication failed';
-      if (err.code === 'auth/user-not-found') {
-        errMsg = 'No account found with this email. Please sign up instead!';
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+        errMsg = 'Invalid email/password, or no account found. Please check your credentials or register a new account!';
       } else if (err.code === 'auth/wrong-password') {
         errMsg = 'Incorrect email or password. Please try again.';
       } else if (err.code === 'auth/email-already-in-use') {
         errMsg = 'An account already exists with this email address.';
+      } else if (err.code === 'auth/operation-not-allowed') {
+        errMsg = 'Email/Password sign-in provider is not enabled in your Firebase project. Please go to Firebase Console > Authentication > Sign-in method tab, and enable "Email/Password"!';
       } else if (err.code === 'auth/unauthorized-domain' || errMsg.toLowerCase().includes('unauthorized-domain') || errMsg.toLowerCase().includes('unauthorized domain')) {
         errMsg = 'unauthorized-domain';
       }
@@ -315,33 +288,6 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                 </p>
               </div>
 
-              {/* Sandbox Guest Bypass Section (PROMINENT GENTLE SLATE CARD) */}
-              <div className="bg-gradient-to-r from-indigo-50/70 to-pink-50/70 border border-indigo-100/80 p-4 rounded-2xl text-left space-y-2.5 shadow-sm">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 bg-pink-500 rounded-full animate-ping" />
-                  <span className="text-xs font-black text-indigo-700 uppercase tracking-wider">
-                    Quick Sandbox Access
-                  </span>
-                </div>
-                <p className="text-[10.5px] text-slate-600 leading-relaxed font-semibold">
-                  Test travel routers, daily trip schedulers, and multi-currency tools instantly without custom domain limits!
-                </p>
-                <button
-                  onClick={handleSandboxEnter}
-                  disabled={isSandboxLoading}
-                  className="w-full bg-gradient-to-r from-indigo-600 to-pink-500 hover:from-indigo-700 hover:to-pink-600 text-white font-extrabold text-[11px] py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-indigo-600/10 active:scale-95 disabled:opacity-50 uppercase tracking-wider"
-                >
-                  {isSandboxLoading ? (
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <>
-                      <span>Explore Sandbox as Guest</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </>
-                  )}
-                </button>
-              </div>
-
               {/* Beautiful Slide Tab Controller */}
               <div className="bg-slate-100 p-1 rounded-2xl flex relative z-10 border border-slate-200/40">
                 <button
@@ -401,7 +347,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                   </div>
 
                   <p className="text-[9px] text-slate-500 leading-relaxed font-medium">
-                    💡 <strong>Quick Fix:</strong> Paste inside Firebase Auth &gt; Settings &gt; Authorized Domains. Or click the pink <strong>"Explore Sandbox as Guest"</strong> above to test all planner tools immediately!
+                    💡 <strong>Quick Fix:</strong> Paste inside Firebase Auth &gt; Settings &gt; Authorized Domains in your Firebase Console.
                   </p>
                 </div>
               ) : (

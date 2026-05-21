@@ -3163,7 +3163,20 @@ export default function App() {
                   }
                   setIsLoginModalOpen(false);
                 } catch (err: any) {
-                  setAuthError(err.message || 'Authentication failed');
+                  console.error("Auth modal error:", err);
+                  let errMsg = err.message || 'Authentication failed';
+                  if (err.code === 'auth/operation-not-allowed') {
+                    errMsg = 'Email/Password sign-in provider is not enabled in your Firebase project. Please enable "Email/Password" under the Authentication > Sign-in method tab in the Firebase Console!';
+                  } else if (err.code === 'auth/unauthorized-domain' || errMsg.toLowerCase().includes('unauthorized-domain')) {
+                    errMsg = 'This domain is unauthorized. Please whitelist your development/hosting domain in your Firebase Console under Authentication > Settings > Authorized Domains!';
+                  } else if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+                    errMsg = 'Invalid email/password, or account does not exist. Please check your inputs or sign up for a new account!';
+                  } else if (err.code === 'auth/wrong-password') {
+                    errMsg = 'Incorrect password. Please try again.';
+                  } else if (err.code === 'auth/email-already-in-use') {
+                    errMsg = 'Email address is already in use by another account.';
+                  }
+                  setAuthError(errMsg);
                 } finally {
                   setIsAuthLoading(false);
                 }
