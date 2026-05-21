@@ -1485,7 +1485,13 @@ export default function App() {
       setUserTrips([]);
       return;
     }
-    const q = query(collection(db, 'trips'), where('ownerId', '==', currentUser.uid));
+    const ownerIds = [currentUser.uid];
+    if (currentUser.uid !== 'sandbox_guest_explorer') {
+      ownerIds.push('sandbox_guest_explorer');
+    }
+    ownerIds.push('guest');
+    
+    const q = query(collection(db, 'trips'), where('ownerId', 'in', ownerIds));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const tripsList: any[] = [];
       snapshot.forEach((docSnap) => {
@@ -1494,6 +1500,7 @@ export default function App() {
       setUserTrips(tripsList);
     }, (err) => {
       console.error("Error subscribing to personal user trips:", err);
+      handleFirestoreError(err, OperationType.GET, 'trips');
     });
     return () => unsubscribe();
   }, [currentUser]);
@@ -1692,6 +1699,13 @@ export default function App() {
         if (data.baseCurrency !== undefined) setBaseCur(data.baseCurrency);
         if (data.targetCurrency !== undefined) setTargetCur(data.targetCurrency);
         if (data.conversionRate !== undefined) setConvRate(data.conversionRate);
+
+        // Auto-claim anonymous guest trips for the logged-in user
+        if (currentUser && (!data.ownerId || data.ownerId === 'guest')) {
+          setDoc(tripRef, { ownerId: currentUser.uid }, { merge: true }).catch(err => {
+            console.error("Failed to claim guest trip:", err);
+          });
+        }
       } else {
         try {
           setDoc(tripRef, {
@@ -3233,7 +3247,7 @@ export default function App() {
       {/* + Create New Trip Dialog Modal */}
       <AnimatePresence>
         {isCreateTripOpen && (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 overflow-y-auto">
             {/* Backdrop */}
             <motion.div
               initial={{ opacity: 0 }}
@@ -3248,21 +3262,71 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95, y: 15 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              className="bg-white border border-slate-200/80 w-full max-w-sm rounded-[24px] shadow-2xl overflow-hidden relative z-50 p-5 md:p-6 space-y-4 flex flex-col text-slate-800"
+              className="bg-white border border-slate-200 w-full max-w-lg rounded-[32px] shadow-[0_25px_60px_-15px_rgba(0,0,0,0.12)] overflow-hidden relative z-50 p-6 md:p-8 flex flex-col text-slate-800 space-y-6"
             >
+              {/* Double bold color accent top line */}
+              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-indigo-500 via-pink-500 to-amber-400" />
+
+              {/* Modal Title Header */}
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-indigo-600" />
-                  <h2 className="text-xs font-black text-slate-800 uppercase tracking-widest">Create New Trip Planner</h2>
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-650 shrink-0">
+                    <Compass className="w-5 h-5 text-indigo-600 animate-spin" style={{ animationDuration: '20s' }} />
+                  </div>
+                  <div className="text-left">
+                    <h2 className="text-base font-black text-slate-900 leading-snug">Design New Adventure</h2>
+                    <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Map custom itineraries & currency exchanges</p>
+                  </div>
                 </div>
                 <button
                   onClick={() => setIsCreateTripOpen(false)}
-                  className="text-slate-400 hover:text-slate-600 font-bold text-xl px-2 hover:bg-slate-50 rounded-lg cursor-pointer transition-colors"
+                  className="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors border border-slate-200/60 cursor-pointer"
                 >
-                  ×
+                  <span className="text-lg font-black leading-none">×</span>
                 </button>
               </div>
 
+              {/* Quick Popular Presets Selector (Awesome interactive touch) */}
+              <div className="space-y-2 text-left">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">
+                  ⚡ Quick Starter Presets
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { name: 'Tokyo Cultural Escapade', city: 'Tokyo, Japan', emoji: '🍣', lat: 35.6762, lng: 139.6503, days: 7, color: 'hover:border-rose-400 hover:bg-rose-50 text-rose-700' },
+                    { name: 'Saigon Street Food Route', city: 'Ho Chi Minh City, Vietnam', emoji: '🍜', lat: 10.7760, lng: 106.7000, days: 5, color: 'hover:border-amber-400 hover:bg-amber-50 text-amber-700' },
+                    { name: 'London Classic Highlights', city: 'London, United Kingdom', emoji: '🏰', lat: 51.5074, lng: -0.1278, days: 6, color: 'hover:border-indigo-400 hover:bg-indigo-50 text-indigo-700' },
+                    { name: 'Bali Sands & Sunshine', city: 'Bali, Indonesia', emoji: '🌴', lat: -8.4095, lng: 115.1889, days: 8, color: 'hover:border-emerald-400 hover:bg-emerald-50 text-emerald-700' }
+                  ].map((preset) => (
+                    <button
+                      key={preset.name}
+                      type="button"
+                      onClick={() => {
+                        setCreateTripName(preset.name);
+                        setCreateTripDestinationLabel(preset.city);
+                        setCreateTripLat(preset.lat);
+                        setCreateTripLng(preset.lng);
+                        // Adjust departure based on arrival & days
+                        try {
+                          const arrDate = new Date(createTripArrival);
+                          if (!isNaN(arrDate.getTime())) {
+                            const depDate = new Date(arrDate.getTime() + (preset.days - 1) * 24 * 60 * 60 * 1000);
+                            setCreateTripDeparture(depDate.toISOString().split('T')[0]);
+                          }
+                        } catch (err) {
+                          console.error(err);
+                        }
+                      }}
+                      className={`px-3 py-1.5 rounded-xl border border-slate-200 bg-white font-black text-[10.5px] transition-all cursor-pointer flex items-center gap-1.5 shadow-sm hover:scale-[1.02] active:scale-[0.98] ${preset.color}`}
+                    >
+                      <span>{preset.emoji}</span>
+                      <span>{preset.city.split(',')[0]}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Creator Main Form */}
               <form onSubmit={async (e) => {
                 e.preventDefault();
                 if (!createTripName.trim()) return;
@@ -3327,66 +3391,175 @@ export default function App() {
                 } finally {
                   setIsCreatingTripLoading(false);
                 }
-              }} className="space-y-3">
+              }} className="space-y-4 text-left">
                 
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Plan Name</label>
+                {/* Plan Name field */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Plan Identifier Title</label>
                   <input
                     type="text"
                     required
                     placeholder="e.g. Kyoto Cherry Blossom Trip"
                     value={createTripName}
                     onChange={(e) => setCreateTripName(e.target.value)}
-                    className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full shadow-sm"
+                    className="bg-slate-50/50 border border-slate-200/90 rounded-2xl px-3.5 py-2.5 text-xs text-slate-900 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-650 focus:border-indigo-650 w-full hover:border-slate-350 transition-all shadow-sm placeholder-slate-400"
                   />
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Search City / Country</label>
+                {/* City Search Field */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Interactive City Fetcher</label>
                   <CitySearchAutocomplete 
+                    value={createTripDestinationLabel}
+                    onChange={(val) => setCreateTripDestinationLabel(val)}
                     onCitySelect={(city, lat, lng) => {
                       setCreateTripDestinationLabel(city);
                       setCreateTripLat(lat);
                       setCreateTripLng(lng);
                     }} 
                   />
-                  {createTripDestinationLabel && (
-                    <div className="text-[9px] font-extrabold text-[#10B981] uppercase tracking-wide bg-emerald-50 border border-emerald-100 p-1.5 rounded-lg mt-1">
-                      Matched: {createTripDestinationLabel} ({createTripLat.toFixed(3)}, {createTripLng.toFixed(3)})
+                  {createTripDestinationLabel ? (
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50/80 border border-emerald-100 rounded-xl text-[10px] font-bold text-emerald-800 shadow-sm mt-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                      <span>Matched: <strong>{createTripDestinationLabel}</strong> (Lat: {createTripLat.toFixed(3)}, Lng: {createTripLng.toFixed(3)})</span>
                     </div>
+                  ) : (
+                    <p className="text-[9px] text-slate-400 font-bold italic block pl-1">
+                      Search and click options from the Google Places list above to find precise coordinates!
+                    </p>
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Arrival</label>
-                    <input
-                      type="date"
-                      required
-                      value={createTripArrival}
-                      onChange={(e) => setCreateTripArrival(e.target.value)}
-                      className="bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 text-xs text-slate-800 font-medium focus:outline-none w-full"
-                    />
+                {/* Dates Selector and duration pill tabs */}
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Arrival Date</label>
+                      <input
+                        type="date"
+                        required
+                        value={createTripArrival}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setCreateTripArrival(val);
+                          // Auto shift departure to fit at least 3 days if departure becomes earlier
+                          try {
+                            const newArr = new Date(val);
+                            const currentDep = new Date(createTripDeparture);
+                            if (!isNaN(newArr.getTime()) && (!isNaN(currentDep.getTime()) && currentDep < newArr)) {
+                              const depDate = new Date(newArr.getTime() + 2 * 24 * 60 * 60 * 1000);
+                              setCreateTripDeparture(depDate.toISOString().split('T')[0]);
+                            }
+                          } catch (err) {
+                            console.error(err);
+                          }
+                        }}
+                        className="bg-slate-50/50 border border-slate-200/95 rounded-2xl px-3 py-2.5 text-xs text-slate-900 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-650 w-full transition-all hover:border-slate-300"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Departure Date</label>
+                      <input
+                        type="date"
+                        required
+                        value={createTripDeparture}
+                        onChange={(e) => setCreateTripDeparture(e.target.value)}
+                        className="bg-slate-50/50 border border-slate-200/95 rounded-2xl px-3 py-2.5 text-xs text-slate-900 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-650 w-full transition-all hover:border-slate-300"
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Departure</label>
-                    <input
-                      type="date"
-                      required
-                      value={createTripDeparture}
-                      onChange={(e) => setCreateTripDeparture(e.target.value)}
-                      className="bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 text-xs text-slate-800 font-medium focus:outline-none w-full"
-                    />
+
+                  {/* Smart quick duration helpers */}
+                  <div className="flex items-center gap-1.5 pt-1">
+                    <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider block mr-1 pl-1">Quick Duration:</span>
+                    {[3, 5, 7, 10, 14].map((days) => (
+                      <button
+                        key={days}
+                        type="button"
+                        onClick={() => {
+                          try {
+                            const arrDate = new Date(createTripArrival);
+                            if (!isNaN(arrDate.getTime())) {
+                              const depDate = new Date(arrDate.getTime() + (days - 1) * 24 * 60 * 60 * 1000);
+                              setCreateTripDeparture(depDate.toISOString().split('T')[0]);
+                            }
+                          } catch (err) {
+                            console.error(err);
+                          }
+                        }}
+                        className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-650 font-black text-[9.5px] rounded-lg border border-slate-200/50 cursor-pointer active:scale-95 transition-all"
+                      >
+                        +{days} Days
+                      </button>
+                    ))}
                   </div>
                 </div>
 
+                {/* Interactive Dynamic Live Card Theme Preview */}
+                {(createTripName || createTripDestinationLabel) && (
+                  <div className="bg-slate-50 border border-slate-200/70 rounded-2xl p-4 text-left select-none relative overflow-hidden space-y-2">
+                    <span className="text-[8px] font-black uppercase tracking-widest text-[#4f46e5]">Live Core Preview</span>
+                    
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="space-y-1 text-left">
+                        <h4 className="text-xs font-black text-slate-900 truncate max-w-[200px]">
+                          {createTripName || 'Unnamed Adventure'}
+                        </h4>
+                        <p className="text-[9.5px] font-bold text-slate-500">
+                          🗺️ {createTripDestinationLabel || 'Custom Destination'}
+                        </p>
+                      </div>
+
+                      {/* Cool Dynamic Emoji selector preview badges */}
+                      <span className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-xl shadow-sm shrink-0">
+                        {(() => {
+                          const destLower = (createTripDestinationLabel || '').toLowerCase();
+                          if (destLower.includes('vietnam') || destLower.includes('saigon') || destLower.includes('hanoi')) return '🍜';
+                          if (destLower.includes('japan') || destLower.includes('tokyo') || destLower.includes('kyoto')) return '🍣';
+                          if (destLower.includes('singapore')) return '🦁';
+                          if (destLower.includes('united kingdom') || destLower.includes('london')) return '🏰';
+                          if (destLower.includes('beach') || destLower.includes('hawaii') || destLower.includes('bali')) return '🌴';
+                          return '🎒';
+                        })()}
+                      </span>
+                    </div>
+
+                    {/* Calculated Days count visual check */}
+                    {(() => {
+                      try {
+                        const a = new Date(createTripArrival);
+                        const d = new Date(createTripDeparture);
+                        if (!isNaN(a.getTime()) && !isNaN(d.getTime())) {
+                          const diffTime = Math.abs(d.getTime() - a.getTime());
+                          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+                          return (
+                            <div className="flex items-center gap-1.5 text-[9px] font-black tracking-wide text-indigo-600 bg-indigo-50 border border-indigo-100/50 px-2.5 py-1 rounded-lg w-fit">
+                              🧳 Setup sequence: {diffDays} {diffDays === 1 ? 'Day' : 'Days'} total plan range
+                            </div>
+                          );
+                        }
+                      } catch {
+                        return null;
+                      }
+                      return null;
+                    })()}
+                  </div>
+                )}
+
+                {/* Submission Flow button */}
                 <button
                   type="submit"
                   disabled={isCreatingTripLoading || !createTripDestinationLabel}
-                  className="w-full bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-indigo-700 text-white font-bold text-xs py-2.5 rounded-xl transition-all cursor-pointer shadow-md shadow-indigo-600/10 active:scale-95 flex items-center justify-center gap-2 mt-2"
+                  className="w-full bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 disabled:opacity-50 disabled:from-indigo-400 disabled:to-indigo-500 text-white font-extrabold text-xs py-3.5 rounded-2xl transition-all cursor-pointer shadow-lg shadow-indigo-600/10 active:scale-95 flex items-center justify-center gap-2 mt-4 uppercase tracking-wider disabled:cursor-not-allowed"
                 >
-                  {isCreatingTripLoading && <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                  <span>Generate Travel Planner</span>
+                  {isCreatingTripLoading ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <span>Generate Master Planner</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </>
+                  )}
                 </button>
               </form>
             </motion.div>
@@ -3401,15 +3574,20 @@ export default function App() {
 }
 
 // Separate Autocomplete helper for Cities in new trip modal
-function CitySearchAutocomplete({ onCitySelect }: { onCitySelect: (city: string, lat: number, lng: number) => void }) {
-  const [val, setVal] = useState('');
+interface CitySearchAutocompleteProps {
+  value: string;
+  onChange: (val: string) => void;
+  onCitySelect: (city: string, lat: number, lng: number) => void;
+}
+
+function CitySearchAutocomplete({ value, onChange, onCitySelect }: CitySearchAutocompleteProps) {
   const [list, setList] = useState<google.maps.places.AutocompleteSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const placesLib = useMapsLibrary('places');
   const tokenRef = useRef<google.maps.places.AutocompleteSessionToken | null>(null);
 
   useEffect(() => {
-    if (!placesLib || !val) {
+    if (!placesLib || !value) {
       setList([]);
       return;
     }
@@ -3421,7 +3599,7 @@ function CitySearchAutocomplete({ onCitySelect }: { onCitySelect: (city: string,
       setLoading(true);
       try {
         const { suggestions } = await placesLib.AutocompleteSuggestion.fetchAutocompleteSuggestions({
-          input: val,
+          input: value,
           sessionToken: tokenRef.current!
         });
         setList(suggestions);
@@ -3434,7 +3612,7 @@ function CitySearchAutocomplete({ onCitySelect }: { onCitySelect: (city: string,
 
     const t = setTimeout(fetchCities, 250);
     return () => clearTimeout(t);
-  }, [placesLib, val]);
+  }, [placesLib, value]);
 
   const selectHandler = async (s: google.maps.places.AutocompleteSuggestion) => {
     if (!placesLib || !s.placePrediction) return;
@@ -3442,9 +3620,8 @@ function CitySearchAutocomplete({ onCitySelect }: { onCitySelect: (city: string,
     await place.fetchFields({ fields: ['displayName', 'location'] });
     
     if (place.location) {
-      onCitySelect(place.displayName || val, place.location.lat(), place.location.lng());
+      onCitySelect(place.displayName || value, place.location.lat(), place.location.lng());
     }
-    setVal('');
     setList([]);
     tokenRef.current = null;
   };
@@ -3455,11 +3632,11 @@ function CitySearchAutocomplete({ onCitySelect }: { onCitySelect: (city: string,
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
         <input
           type="text"
-          value={val}
-          required={!val}
-          onChange={(e) => setVal(e.target.value)}
+          value={value}
+          required
+          onChange={(e) => onChange(e.target.value)}
           placeholder="e.g. Kyoto, Singapore, Paris..."
-          className="w-full pl-9 pr-8 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:border-indigo-500 shadow-inner"
+          className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200/80 rounded-xl text-xs outline-none focus:border-indigo-500 shadow-inner text-slate-800 font-medium"
         />
         {loading && (
           <div className="absolute right-3 top-1/2 -translate-y-1/2">

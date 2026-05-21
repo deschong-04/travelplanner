@@ -75,7 +75,7 @@ service cloud.firestore {
     // Rule for trips
     match /trips/{tripId} {
       allow get: if isValidId(tripId);
-      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || resource.data.ownerId == 'sandbox_guest_explorer' || resource.data.ownerId == 'guest');
       allow create: if isValidId(tripId) && isValidTrip(incoming());
       allow update: if isValidId(tripId) && isValidTrip(incoming()) && (
         incoming().diff(existing()).affectedKeys().hasOnly([
