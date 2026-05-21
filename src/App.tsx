@@ -431,7 +431,7 @@ function MockInteractiveMap({
         <div>
           <div className="flex items-center gap-2">
             <span className="inline-block w-2.5 h-2.5 bg-amber-500 rounded-full animate-pulse" />
-            <h3 className="text-sm font-black text-slate-800 tracking-tight uppercase">Saigon Interactive Transit Router</h3>
+            <h3 className="text-sm font-black text-slate-800 tracking-tight uppercase">Interactive Transit Router</h3>
           </div>
           <p className="text-[11px] text-slate-400 mt-0.5">Offline Fallback View (VITE_GOOGLE_MAPS_PLATFORM_KEY not set)</p>
         </div>
@@ -1552,8 +1552,8 @@ export default function App() {
   // Trip Info State
   const [plannerName, setPlannerName] = useState(() => {
     const saved = localStorage.getItem('saigon_trip_info');
-    if (saved) return JSON.parse(saved).plannerName || 'Saigon Travel Master Planner';
-    return 'Saigon Travel Master Planner';
+    if (saved) return JSON.parse(saved).plannerName || 'Atlas Travel Master Planner';
+    return 'Atlas Travel Master Planner';
   });
 
   const [arrivalDate, setArrivalDate] = useState(() => {
@@ -2392,7 +2392,7 @@ export default function App() {
                                 Google Maps Autocomplete (Offline Mode)
                               </div>
                               <p className="text-[11.5px] text-slate-500 leading-relaxed">
-                                The app is running offline or is deployed without a Maps API key. You can still easily add locations using <strong className="text-indigo-600 uppercase font-extrabold font-sans">"Or Add Manually"</strong> or extract curated Saigon spots with <strong className="text-indigo-600 uppercase font-extrabold font-sans">"View Suggested"</strong>!
+                                The app is running offline or is deployed without a Maps API key. You can still easily add locations using <strong className="text-indigo-600 uppercase font-extrabold font-sans">"Or Add Manually"</strong> or extract curated itinerary spots with <strong className="text-indigo-600 uppercase font-extrabold font-sans">"View Suggested"</strong>!
                               </p>
                               <div className="pt-1.5">
                                 <span className="text-[9.5px] font-bold tracking-wider text-indigo-600 uppercase bg-indigo-50/50 px-3 py-1 rounded-full border border-indigo-100 block sm:inline-block">
