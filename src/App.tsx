@@ -24,7 +24,8 @@ import {
   Check,
   Users,
   Edit2,
-  ArrowRight
+  ArrowRight,
+  ArrowLeft
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { APIProvider, useMapsLibrary, Map, AdvancedMarker, Pin, InfoWindow, useMap } from '@vis.gl/react-google-maps';
@@ -54,6 +55,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { restrictToWindowEdges } from '@dnd-kit/modifiers';
 import { db, auth, googleProvider, handleFirestoreError, OperationType } from './firebase';
 import LandingPage from './components/LandingPage';
+import Dashboard from './components/Dashboard';
 import { 
   onAuthStateChanged, 
   signInWithPopup, 
@@ -1292,6 +1294,10 @@ const customCollisionDetection: CollisionDetection = (args) => {
 export default function App() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<'dashboard' | 'planner'>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('tripId') ? 'planner' : 'dashboard';
+  });
 
   // --- Real Authentication Form States ---
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
@@ -1378,12 +1384,20 @@ export default function App() {
   // Synchronize dynamic tripId parameter into query string
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('tripId') !== tripId) {
-      params.set('tripId', tripId);
-      const newUrl = `${window.location.pathname}?${params.toString()}`;
-      window.history.replaceState({ path: newUrl }, '', newUrl);
+    if (viewMode === 'planner') {
+      if (params.get('tripId') !== tripId) {
+        params.set('tripId', tripId);
+        const newUrl = `${window.location.pathname}?${params.toString()}`;
+        window.history.replaceState({ path: newUrl }, '', newUrl);
+      }
+    } else {
+      if (params.get('tripId')) {
+        params.delete('tripId');
+        const newUrl = `${window.location.pathname}?${params.toString()}`;
+        window.history.replaceState({ path: newUrl }, '', newUrl);
+      }
     }
-  }, [tripId]);
+  }, [tripId, viewMode]);
 
   // Subscribe and write to real-time presence collection
   useEffect(() => {
@@ -2033,6 +2047,28 @@ export default function App() {
           </div>
         ) : !currentUser ? (
           <LandingPage onLoginSuccess={(user) => setCurrentUser(user)} />
+        ) : viewMode === 'dashboard' ? (
+          <Dashboard 
+            currentUser={currentUser} 
+            userTrips={userTrips} 
+            onSelectTrip={(id) => {
+              setTripId(id);
+              localStorage.setItem('saigon_trip_id', id);
+              setViewMode('planner');
+            }} 
+            onCreateNewTripClick={() => {
+              setCreateTripName('');
+              setCreateTripDestinationLabel('');
+              setIsCreateTripOpen(true);
+            }} 
+            onDeleteTrip={async (id) => {
+              try {
+                await deleteDoc(doc(db, 'trips', id));
+              } catch (err) {
+                console.error("Delete trip failed:", err);
+              }
+            }} 
+          />
         ) : (
           <>
             <DndContext 
@@ -2068,6 +2104,16 @@ export default function App() {
 
                   {currentUser && (
                     <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('dashboard')}
+                        className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold px-3.5 py-1.5 rounded-xl text-[10.5px] uppercase tracking-wider transition-all cursor-pointer shadow-sm hover:scale-[1.02]"
+                        title="Back to Travels Dashboard"
+                      >
+                        <ArrowLeft className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                        <span className="hidden sm:inline">My Travels</span>
+                      </button>
+
                       <select
                         value={tripId}
                         onChange={(e) => {
@@ -3275,6 +3321,7 @@ export default function App() {
                   window.history.pushState({}, '', url.toString());
 
                   setIsCreateTripOpen(false);
+                  setViewMode('planner');
                 } catch (err) {
                   console.error("Failed to build new trip:", err);
                 } finally {
