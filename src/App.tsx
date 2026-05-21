@@ -2061,31 +2061,33 @@ export default function App() {
           </div>
         ) : !currentUser ? (
           <LandingPage onLoginSuccess={(user) => setCurrentUser(user)} />
-        ) : viewMode === 'dashboard' ? (
-          <Dashboard 
-            currentUser={currentUser} 
-            userTrips={userTrips} 
-            onSelectTrip={(id) => {
-              setTripId(id);
-              localStorage.setItem('saigon_trip_id', id);
-              setViewMode('planner');
-            }} 
-            onCreateNewTripClick={() => {
-              setCreateTripName('');
-              setCreateTripDestinationLabel('');
-              setIsCreateTripOpen(true);
-            }} 
-            onDeleteTrip={async (id) => {
-              try {
-                await deleteDoc(doc(db, 'trips', id));
-              } catch (err) {
-                console.error("Delete trip failed:", err);
-              }
-            }} 
-          />
         ) : (
           <>
-            <DndContext 
+            {viewMode === 'dashboard' ? (
+              <Dashboard 
+                currentUser={currentUser} 
+                userTrips={userTrips} 
+                onSelectTrip={(id) => {
+                  setTripId(id);
+                  localStorage.setItem('saigon_trip_id', id);
+                  setViewMode('planner');
+                }} 
+                onCreateNewTripClick={() => {
+                  setCreateTripName('');
+                  setCreateTripDestinationLabel('');
+                  setIsCreateTripOpen(true);
+                }} 
+                onDeleteTrip={async (id) => {
+                  try {
+                    await deleteDoc(doc(db, 'trips', id));
+                  } catch (err) {
+                    console.error("Delete trip failed:", err);
+                  }
+                }} 
+              />
+            ) : (
+              <>
+                <DndContext 
               sensors={sensors}
         collisionDetection={customCollisionDetection}
         onDragStart={handleDragStart}
@@ -3062,6 +3064,8 @@ export default function App() {
           <span className="text-[10px] font-bold text-ink uppercase tracking-tighter">Money</span>
         </button>
       </div>
+              </>
+            )}
 
       {/* Login / Auth Dialog Modal */}
       <AnimatePresence>
