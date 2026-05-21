@@ -1342,6 +1342,10 @@ export default function App() {
   };
 
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const isStandalone = typeof window !== 'undefined' && (
+    (window.navigator as any).standalone || 
+    window.matchMedia('(display-mode: standalone)').matches
+  );
   const [loginEmail, setLoginEmail] = useState('');
   const [loginName, setLoginName] = useState('');
 
@@ -3229,6 +3233,16 @@ export default function App() {
                 <span className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400 shrink-0">OR QUICK LINK</span>
                 <div className="h-[1px] bg-slate-200 flex-1" />
               </div>
+
+              {/* iOS Standalone Friendly Warning/Helper Info */}
+              {isStandalone && (
+                <div className="bg-amber-50/90 text-amber-900 border border-amber-200/50 p-3 rounded-2xl text-[10px] leading-relaxed text-left font-semibold shadow-inner my-2">
+                  <span className="inline-block mr-1">💡</span>
+                  <strong>iOS Standalone Web Clip Detected</strong>:<br/>
+                  Apple's custom Web Clip sandbox limits standard Google Sign-In popups/redirects.
+                  Please register or log in using <strong className="font-extrabold text-indigo-700 underline">Email & Password</strong> above, which works flawlessly right here!
+                </div>
+              )}
 
               {/* standard Google federated auth */}
               <button
