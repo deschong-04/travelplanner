@@ -24,6 +24,16 @@ service cloud.firestore {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
     }
 
+    // relational access validator
+    function canAccessTrip(tripId) {
+      return isValidId(tripId) && (
+        !exists(/databases/$(database)/documents/trips/$(tripId)) ||
+        get(/databases/$(database)/documents/trips/$(tripId)).data.ownerId == request.auth.uid ||
+        get(/databases/$(database)/documents/trips/$(tripId)).data.ownerId == 'guest' ||
+        get(/databases/$(database)/documents/trips/$(tripId)).data.isShared == true
+      );
+    }
+
     // Validation for Trip Entity
     function isValidTrip(data) {
       return data.plannerName is string 
@@ -40,6 +50,7 @@ service cloud.firestore {
         && (!('baseCurrency' in data) || (data.baseCurrency is string && data.baseCurrency.size() <= 10))
         && (!('targetCurrency' in data) || (data.targetCurrency is string && data.targetCurrency.size() <= 10))
         && (!('conversionRate' in data) || data.conversionRate is number)
+        && (!('isShared' in data) || data.isShared is bool)
         && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 100));
     }
 
@@ -74,10 +85,23 @@ service cloud.firestore {
 
     // Rule for trips
     match /trips/{tripId} {
-      allow get: if isValidId(tripId);
-      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || resource.data.ownerId == 'sandbox_guest_explorer' || resource.data.ownerId == 'guest');
-      allow create: if isValidId(tripId) && isValidTrip(incoming());
+      allow get: if isValidId(tripId) && (
+        resource == null || 
+        resource.data.ownerId == request.auth.uid || 
+        resource.data.ownerId == 'guest' || 
+        resource.data.isShared == true
+      );
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid);
+      allow create: if isValidId(tripId) && isValidTrip(incoming()) && (
+        !('ownerId' in incoming()) || 
+        incoming().ownerId == request.auth.uid || 
+        incoming().ownerId == 'guest'
+      );
       allow update: if isValidId(tripId) && isValidTrip(incoming()) && (
+        existing().ownerId == request.auth.uid || 
+        existing().ownerId == 'guest' || 
+        existing().isShared == true
+      ) && (
         incoming().diff(existing()).affectedKeys().hasOnly([
           'plannerName', 
           'destination', 
@@ -89,27 +113,28 @@ service cloud.firestore {
           'lng', 
           'baseCurrency', 
           'targetCurrency', 
-          'conversionRate'
+          'conversionRate',
+          'isShared'
         ])
       );
-      allow delete: if isValidId(tripId);
+      allow delete: if isValidId(tripId) && (existing().ownerId == request.auth.uid || existing().ownerId == 'guest');
 
       // Rule for subcollection places
       match /places/{placeId} {
-        allow get: if isValidId(tripId) && isValidId(placeId);
-        allow list: if isValidId(tripId);
-        allow create: if isValidId(tripId) && isValidId(placeId) && isValidPlace(incoming());
-        allow update: if isValidId(tripId) && isValidId(placeId) && isValidPlace(incoming());
-        allow delete: if isValidId(tripId) && isValidId(placeId);
+        allow get: if isValidId(tripId) && isValidId(placeId) && canAccessTrip(tripId);
+        allow list: if isValidId(tripId) && canAccessTrip(tripId);
+        allow create: if isValidId(tripId) && isValidId(placeId) && isValidPlace(incoming()) && canAccessTrip(tripId);
+        allow update: if isValidId(tripId) && isValidId(placeId) && isValidPlace(incoming()) && canAccessTrip(tripId);
+        allow delete: if isValidId(tripId) && isValidId(placeId) && canAccessTrip(tripId);
       }
 
       // Rule for subcollection presence
       match /presence/{presenceId} {
-        allow get: if isValidId(tripId) && isValidId(presenceId);
-        allow list: if isValidId(tripId);
-        allow create: if isValidId(tripId) && isValidId(presenceId) && isValidPresence(incoming());
-        allow update: if isValidId(tripId) && isValidId(presenceId) && isValidPresence(incoming());
-        allow delete: if isValidId(tripId) && isValidId(presenceId);
+        allow get: if isValidId(tripId) && isValidId(presenceId) && canAccessTrip(tripId);
+        allow list: if isValidId(tripId) && canAccessTrip(tripId);
+        allow create: if isValidId(tripId) && isValidId(presenceId) && isValidPresence(incoming()) && canAccessTrip(tripId);
+        allow update: if isValidId(tripId) && isValidId(presenceId) && isValidPresence(incoming()) && canAccessTrip(tripId);
+        allow delete: if isValidId(tripId) && isValidId(presenceId) && canAccessTrip(tripId);
       }
     }
   }

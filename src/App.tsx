@@ -25,7 +25,8 @@ import {
   Users,
   Edit2,
   ArrowRight,
-  ArrowLeft
+  ArrowLeft,
+  Lock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { APIProvider, useMapsLibrary, Map, AdvancedMarker, Pin, InfoWindow, useMap } from '@vis.gl/react-google-maps';
@@ -1308,6 +1309,8 @@ export default function App() {
 
   // --- Multi-Trip Plan & Switcher States ---
   const [userTrips, setUserTrips] = useState<any[]>([]);
+  const [isShared, setIsShared] = useState<boolean>(false);
+  const [tripAccessError, setTripAccessError] = useState<string | null>(null);
   const [isCreateTripOpen, setIsCreateTripOpen] = useState(false);
 
   // Trip Creation Form States
@@ -1681,7 +1684,9 @@ export default function App() {
 
   // Cloud Sync: Subscribe to Trip Metadata on Firestore
   useEffect(() => {
-    if (!tripId) return;
+    if (!tripId || viewMode !== 'planner') return;
+
+    setTripAccessError(null);
 
     const tripRef = doc(db, 'trips', tripId);
     const unsubscribe = onSnapshot(tripRef, (docSnap) => {
@@ -1691,6 +1696,7 @@ export default function App() {
         setArrivalDate((prev: string) => prev !== data.arrivalDate ? (data.arrivalDate || '') : prev);
         setDepartureDate((prev: string) => prev !== data.departureDate ? (data.departureDate || '') : prev);
         setDestinationLabel((prev: string) => prev !== data.destination ? (data.destination || 'Saigon') : prev);
+        setIsShared(!!data.isShared);
         
         if (data.lat !== undefined) setDestinationLat(data.lat);
         if (data.lng !== undefined) setDestinationLng(data.lng);
@@ -1718,6 +1724,7 @@ export default function App() {
             targetCurrency: targetCur,
             conversionRate: convRate,
             ownerId: currentUser?.uid || 'guest',
+            isShared: false,
             updatedAt: new Date().toISOString()
           });
         } catch (err) {
@@ -1725,11 +1732,16 @@ export default function App() {
         }
       }
     }, (error) => {
-      handleFirestoreError(error, OperationType.GET, `trips/${tripId}`);
+      const errStr = error instanceof Error ? error.message : String(error);
+      if (errStr.toLowerCase().includes("permission-denied") || errStr.toLowerCase().includes("insufficient permissions") || errStr.toLowerCase().includes("missing or insufficient permissions")) {
+        setTripAccessError("Access Denied: This travel plan is private. Please request the owner to toggle shared permissions.");
+      } else {
+        handleFirestoreError(error, OperationType.GET, `trips/${tripId}`);
+      }
     });
 
     return () => unsubscribe();
-  }, [tripId]);
+  }, [tripId, viewMode, currentUser]);
 
   // Keep the latest copy of places to prevent stale closure in subscription callback
   const placesRefVal = useRef(places);
@@ -1739,7 +1751,7 @@ export default function App() {
 
   // Cloud Sync: Subscribe to Place Documents inside the shared trip subcollection
   useEffect(() => {
-    if (!tripId) return;
+    if (!tripId || viewMode !== 'planner') return;
 
     const placesRef = collection(db, 'trips', tripId, 'places');
     const unsubscribe = onSnapshot(placesRef, async (querySnap) => {
@@ -1772,11 +1784,11 @@ export default function App() {
     });
 
     return () => unsubscribe();
-  }, [tripId]);
+  }, [tripId, viewMode, currentUser]);
 
   // Cloud Sync: Push user keystrokes / edits for trip info with 1s debounce
   useEffect(() => {
-    if (!tripId) return;
+    if (!tripId || viewMode !== 'planner') return;
 
     const timeout = setTimeout(async () => {
       try {
@@ -1791,15 +1803,16 @@ export default function App() {
           targetCurrency: targetCur,
           conversionRate: convRate,
           ownerId: currentUser?.uid || 'guest',
+          isShared,
           updatedAt: new Date().toISOString()
-        });
+         });
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `trips/${tripId}`);
       }
     }, 1000);
 
     return () => clearTimeout(timeout);
-  }, [plannerName, arrivalDate, departureDate, destinationLabel, destinationLat, destinationLng, baseCur, targetCur, convRate, tripId, currentUser]);
+  }, [plannerName, arrivalDate, departureDate, destinationLabel, destinationLat, destinationLng, baseCur, targetCur, convRate, tripId, currentUser, viewMode, isShared]);
 
   // Handlers
   const addPlace = (selectedPlace?: google.maps.places.Place) => {
@@ -2084,6 +2097,32 @@ export default function App() {
                   }
                 }} 
               />
+            ) : tripAccessError ? (
+              <div className="min-h-[80vh] w-full flex items-center justify-center p-6 bg-slate-50">
+                <div className="bg-white border border-slate-200 shadow-xl rounded-[32px] p-8 max-w-md w-full text-center space-y-6">
+                  <div className="w-16 h-16 bg-rose-50 border border-rose-100 rounded-2xl flex items-center justify-center text-rose-600 mx-auto shadow-sm">
+                    <Lock className="w-8 h-8" />
+                  </div>
+                  <div className="space-y-2">
+                    <h2 className="text-xl font-bold text-slate-800 tracking-tight">Private Destination Plan</h2>
+                    <p className="text-xs text-slate-500 leading-relaxed font-semibold">
+                      This travel itinerary is private. Only the creator is authorized to access it, unless they enable 'Allow Collaboration & Sharing' inside their Collective Session settings.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setTripAccessError(null);
+                      setViewMode('dashboard');
+                      const params = new URLSearchParams(window.location.search);
+                      params.delete('tripId');
+                      window.history.pushState({}, '', `${window.location.pathname}`);
+                    }}
+                    className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 px-6 rounded-2xl shadow-lg shadow-slate-100 transition-all cursor-pointer text-xs uppercase tracking-wider"
+                  >
+                    Go Back to Dashboard
+                  </button>
+                </div>
+              </div>
             ) : (
               <>
                 <DndContext 
@@ -2275,23 +2314,63 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Room Code:</span>
-                  <div className="flex items-center gap-1 bg-slate-900 text-slate-100 rounded-xl pl-3 pr-1.5 py-1 text-xs font-mono font-bold shadow-inner">
-                    <span>{tripId}</span>
-                    <button
-                      onClick={() => {
-                        const copyUrl = `${window.location.origin}${window.location.pathname}?tripId=${tripId}`;
-                        navigator.clipboard.writeText(copyUrl).then(() => {
-                          setCopySuccess(true);
-                          setTimeout(() => setCopySuccess(false), 2000);
-                        });
-                      }}
-                      className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer"
-                      title="Copy Invite Link"
-                    >
-                      {copySuccess ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    </button>
+                <div className="flex flex-wrap items-center gap-4">
+                  {/* Privacy Toggle */}
+                  <div className="flex items-center bg-slate-50 border border-slate-200/60 rounded-xl px-3 py-1.5">
+                    <label className="relative inline-flex items-center cursor-pointer select-none">
+                      <input 
+                        type="checkbox" 
+                        id="sharing-toggle"
+                        checked={isShared} 
+                        onChange={async (e) => {
+                          const checked = e.target.checked;
+                          setIsShared(checked);
+                          try {
+                            const tripRef = doc(db, 'trips', tripId);
+                            await setDoc(tripRef, {
+                              plannerName,
+                              arrivalDate,
+                              departureDate,
+                              destination: destinationLabel,
+                              lat: destinationLat,
+                              lng: destinationLng,
+                              baseCurrency: baseCur,
+                              targetCurrency: targetCur,
+                              conversionRate: convRate,
+                              ownerId: currentUser?.uid || 'guest',
+                              isShared: checked,
+                              updatedAt: new Date().toISOString()
+                            });
+                          } catch (err) {
+                            console.error("Failed to update share status:", err);
+                          }
+                        }}
+                        className="sr-only peer"
+                      />
+                      <div className="w-7 h-4 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-indigo-600"></div>
+                      <span className="ml-2 text-[10px] font-bold uppercase tracking-wider text-slate-600">Allow Collaboration</span>
+                    </label>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Room Code:</span>
+                    <div className="flex items-center gap-1 bg-slate-900 text-slate-100 rounded-xl pl-3 pr-1.5 py-1 text-xs font-mono font-bold shadow-inner">
+                      <span>{tripId}</span>
+                      <button
+                        id="copy-invite-link"
+                        onClick={() => {
+                          const copyUrl = `${window.location.origin}${window.location.pathname}?tripId=${tripId}`;
+                          navigator.clipboard.writeText(copyUrl).then(() => {
+                            setCopySuccess(true);
+                            setTimeout(() => setCopySuccess(false), 2000);
+                          });
+                        }}
+                        className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer"
+                        title="Copy Invite Link"
+                      >
+                        {copySuccess ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
