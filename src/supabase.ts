@@ -66,6 +66,26 @@ export const supabase = createClient(
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
+// Self-executing diagnostic connection check
+if (isSupabaseConfigured) {
+  supabase.from('trips').select('id').limit(1)
+    .then(({ error }) => {
+      if (error) {
+        // Handle common PG codes like missing table (42P01) or RLS policy errors gracefully
+        if (error.code === '42P01') {
+          console.warn('⚠️ Supabase Connected, but "trips" table was not found. Have you executed the migration SQL in your Supabase SQL Editor? See src/supabase.ts for the SQL commands.');
+        } else {
+          console.error('❌ Supabase Connection Diagnostic Error:', error.message, `(Code: ${error.code})`);
+        }
+      } else {
+        console.log('✨ [Supabase] Connection Diagnostic: Successfully authenticated & connected to your database!');
+      }
+    })
+    .catch(err => {
+      console.error('❌ Supabase Connection Diagnostic Exception:', err);
+    });
+}
+
 // Custom User Mapping (Maps Supabase user object structure to match Firebase user properties used in the application)
 export function mapSupabaseUser(sbUser: any) {
   if (!sbUser) return null;
