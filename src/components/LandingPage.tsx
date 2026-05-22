@@ -16,14 +16,7 @@ import {
   Plus
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { auth, googleProvider } from '../firebase';
-import { 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  updateProfile,
-  signInWithPopup,
-  signInWithRedirect
-} from 'firebase/auth';
+import { supabase, mapSupabaseUser, isSupabaseConfigured } from '../supabase';
 
 interface LandingPageProps {
   onLoginSuccess: (user: any) => void;
@@ -67,6 +60,12 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
     setLoading(true);
     setError(null);
 
+    if (!isSupabaseConfigured) {
+      setError('Supabase is not configured yet! Please configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY inside secrets.');
+      setLoading(false);
+      return;
+    }
+
     try {
       if (mode === 'signup') {
         if (!email || !password) {
@@ -79,30 +78,31 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
           setLoading(false);
           return;
         }
-        const res = await createUserWithEmailAndPassword(auth, email, password);
-        if (name && res.user) {
-          await updateProfile(res.user, { displayName: name });
-        }
-        onLoginSuccess({ ...res.user, displayName: name || res.user.displayName });
+        const { data, error: sbError } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              displayName: name || 'Explorer',
+              name: name || 'Explorer'
+            }
+          }
+        });
+        if (sbError) throw sbError;
+        if (!data.user) throw new Error('Sign up failed');
+        onLoginSuccess(mapSupabaseUser(data.user));
       } else {
-        const res = await signInWithEmailAndPassword(auth, email, password);
-        onLoginSuccess(res.user);
+        const { data, error: sbError } = await supabase.auth.signInWithPassword({
+          email,
+          password
+        });
+        if (sbError) throw sbError;
+        if (!data.user) throw new Error('Sign in failed');
+        onLoginSuccess(mapSupabaseUser(data.user));
       }
     } catch (err: any) {
       console.error("Auth helper error:", err);
-      let errMsg = err.message || 'Authentication failed';
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
-        errMsg = 'Invalid email/password, or no account found. Please check your credentials or register a new account!';
-      } else if (err.code === 'auth/wrong-password') {
-        errMsg = 'Incorrect email or password. Please try again.';
-      } else if (err.code === 'auth/email-already-in-use') {
-        errMsg = 'An account already exists with this email address.';
-      } else if (err.code === 'auth/operation-not-allowed') {
-        errMsg = 'Email/Password sign-in provider is not enabled in your Firebase project. Please go to Firebase Console > Authentication > Sign-in method tab, and enable "Email/Password"!';
-      } else if (err.code === 'auth/unauthorized-domain' || errMsg.toLowerCase().includes('unauthorized-domain') || errMsg.toLowerCase().includes('unauthorized domain')) {
-        errMsg = 'unauthorized-domain';
-      }
-      setError(errMsg);
+      setError(err?.message || 'Authentication failed');
     } finally {
       setLoading(false);
     }
@@ -111,53 +111,30 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
   const handleGoogleSignIn = async () => {
     setLoading(true);
     setError(null);
-    const isSafari = /Safari/i.test(navigator.userAgent) && !/Chrome/i.test(navigator.userAgent);
-    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
-    if (isSafari || isIOS) {
-      try {
-        await signInWithRedirect(auth, googleProvider);
-      } catch (err: any) {
-        console.error("Redirect login error:", err);
-        if (err.code === 'auth/unauthorized-domain' || err.message?.toLowerCase().includes('unauthorized-domain')) {
-          setError('unauthorized-domain');
-        } else {
-          setError(err.message || "Failed to sign in with Google redirect");
-        }
-        setLoading(false);
-      }
+    if (!isSupabaseConfigured) {
+      setError('Supabase is not configured yet! Please configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY inside secrets.');
+      setLoading(false);
       return;
     }
 
     try {
-      const res = await signInWithPopup(auth, googleProvider);
-      if (res?.user) {
-        onLoginSuccess(res.user);
-      }
-    } catch (err: any) {
-      console.error("Popup login error:", err);
-      if (err.code === 'auth/popup-blocked' || err.code === 'auth/popup-closed-by-user' || err.message?.includes('popup')) {
-        try {
-          await signInWithRedirect(auth, googleProvider);
-        } catch (redirectErr: any) {
-          if (redirectErr.code === 'auth/unauthorized-domain' || redirectErr.message?.toLowerCase().includes('unauthorized-domain')) {
-            setError('unauthorized-domain');
-          } else {
-            setError(redirectErr.message || "Google redirect rejected");
-          }
-          setLoading(false);
+      const { error: sbError } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin,
         }
-      } else if (err.code === 'auth/unauthorized-domain' || err.message?.toLowerCase().includes('unauthorized-domain')) {
-        setError('unauthorized-domain');
-        setLoading(false);
-      } else {
-        setError(err.message || 'Google Auth Error');
-        setLoading(false);
-      }
+      });
+      if (sbError) throw sbError;
+    } catch (err: any) {
+      console.error("Google OAuth error:", err);
+      setError(err?.message || 'Google Auth Error');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const isUnauthorizedDomain = error === 'unauthorized-domain';
+  const isUnauthorizedDomain = false;
 
   return (
     <div className="relative min-h-screen bg-slate-50 flex items-center justify-center p-4 md:p-8 overflow-hidden font-sans">

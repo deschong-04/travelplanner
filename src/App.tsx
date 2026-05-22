@@ -54,21 +54,9 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { restrictToWindowEdges } from '@dnd-kit/modifiers';
-import { db, auth, googleProvider, handleFirestoreError, OperationType } from './firebase';
+import { supabase, mapSupabaseUser, handleSupabaseError, OperationType, isSupabaseConfigured } from './supabase';
 import LandingPage from './components/LandingPage';
 import Dashboard from './components/Dashboard';
-import { 
-  onAuthStateChanged, 
-  signInWithPopup, 
-  signInWithRedirect, 
-  getRedirectResult, 
-  signOut, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  updateProfile, 
-  User as FirebaseUser 
-} from 'firebase/auth';
-import { doc, collection, setDoc, deleteDoc, onSnapshot, writeBatch, query, where } from 'firebase/firestore';
 
 // --- Types & Constants ---
 
@@ -1408,144 +1396,158 @@ export default function App() {
 
   // Subscribe and write to real-time presence collection
   useEffect(() => {
-    if (!tripId) return;
+    if (!tripId || !isSupabaseConfigured) return;
 
-    const presenceRef = doc(db, 'trips', tripId, 'presence', clientId);
+    const channel = supabase.channel(`presence:${tripId}`, {
+      config: {
+        presence: {
+          key: clientId,
+        },
+      },
+    });
+
     const updatePresence = async () => {
       try {
-        await setDoc(presenceRef, {
+        await channel.track({
           id: clientId,
           name: activeDisplayName,
           avatar: activePhotoURL || '',
           activeAt: new Date().toISOString()
         });
       } catch (err) {
-        console.warn("Failed to update active presence doc", err);
+        console.warn("Failed to checkin active presence", err);
       }
     };
 
-    updatePresence();
-
-    const presenceColl = collection(db, 'trips', tripId, 'presence');
-    const unsubscribe = onSnapshot(presenceColl, (snap) => {
-      const list: any[] = [];
-      const now = Date.now();
-      snap.forEach((doc) => {
-        const data = doc.data();
-        const activeTime = new Date(data.activeAt).getTime();
-        if (now - activeTime < 180000) { // active within last 3 minutes
-          list.push(data);
-        }
+    channel
+      .on('presence', { event: 'sync' }, () => {
+        const state = channel.presenceState();
+        const list: any[] = [];
+        const now = Date.now();
+        Object.values(state).flat().forEach((user: any) => {
+          const activeTime = new Date(user.activeAt || Date.now()).getTime();
+          if (now - activeTime < 180000) { // active within last 3 minutes
+            list.push(user);
+          }
+        });
+        setCollaborators(list);
       });
-      setCollaborators(list);
-    }, (error) => {
-      console.warn("Presence subscript failed:", error);
+
+    channel.subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') {
+        await updatePresence();
+      }
     });
 
     return () => {
-      unsubscribe();
-      deleteDoc(presenceRef).catch(() => {});
+      channel.unsubscribe();
     };
-  }, [tripId, activeDisplayName, activePhotoURL]);
+  }, [tripId, activeDisplayName, activePhotoURL, clientId]);
 
   // Periodic visual presence heartbeat update
   useEffect(() => {
-    if (!tripId) return;
+    if (!tripId || !isSupabaseConfigured) return;
     const interval = setInterval(async () => {
       try {
-        const presenceRef = doc(db, 'trips', tripId, 'presence', clientId);
-        await setDoc(presenceRef, {
+        const channel = supabase.channel(`presence:${tripId}`);
+        await channel.track({
           id: clientId,
           name: activeDisplayName,
           avatar: activePhotoURL || '',
           activeAt: new Date().toISOString()
-        }, { merge: true });
+        });
       } catch (err) {}
     }, 20000);
     return () => clearInterval(interval);
-  }, [tripId, activeDisplayName, activePhotoURL]);
+  }, [tripId, activeDisplayName, activePhotoURL, clientId]);
 
   // Authenticate user changes
   useEffect(() => {
-    // Force a one-time session purge to start afresh
-    if (localStorage.getItem('db_purged_clear_session_v1') !== 'true') {
-      signOut(auth).catch(() => {});
-      localStorage.removeItem('saigon_custom_user');
-      localStorage.setItem('db_purged_clear_session_v1', 'true');
+    if (!isSupabaseConfigured) {
+      setIsAuthLoading(false);
+      return;
     }
 
     setIsAuthLoading(true);
-    // Retrieve redirect result if we just returned from Google sign-in redirect
-    getRedirectResult(auth)
-      .then((result) => {
-        if (result?.user) {
-          setCurrentUser(result.user);
-        }
-      })
-      .catch((error) => {
-        console.error("Redirect Sign-In Error:", error);
-      });
 
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
+    // Initial session retrieval
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setCurrentUser(mapSupabaseUser(session?.user));
       setIsAuthLoading(false);
     });
-    return () => unsubscribe();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setCurrentUser(mapSupabaseUser(session?.user));
+      setIsAuthLoading(false);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
-  // Subscribe to user's trips from Firebase Firestore in real-time
+  const fetchUserTrips = useCallback(async () => {
+    if (!currentUser || !isSupabaseConfigured) return;
+    try {
+      const { data, error } = await supabase
+        .from('trips')
+        .select('*')
+        .eq('ownerId', currentUser.uid);
+      if (error) throw error;
+      setUserTrips(data || []);
+    } catch (err) {
+      console.error("Error fetching personal user trips:", err);
+    }
+  }, [currentUser]);
+
+  // Subscribe to user's trips from Supabase Database in real-time
   useEffect(() => {
-    if (!currentUser) {
+    if (!currentUser || !isSupabaseConfigured) {
       setUserTrips([]);
       return;
     }
     
-    const q = query(collection(db, 'trips'), where('ownerId', '==', currentUser.uid));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const tripsList: any[] = [];
-      snapshot.forEach((docSnap) => {
-        tripsList.push({ id: docSnap.id, ...docSnap.data() });
-      });
-      setUserTrips(tripsList);
-    }, (err) => {
-      console.error("Error subscribing to personal user trips:", err);
-      handleFirestoreError(err, OperationType.GET, 'trips');
-    });
-    return () => unsubscribe();
-  }, [currentUser]);
+    fetchUserTrips();
+
+    const channel = supabase
+      .channel('user-trips-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'trips',
+          filter: `ownerId=eq.${currentUser.uid}`
+        },
+        () => {
+          fetchUserTrips();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      channel.unsubscribe();
+    };
+  }, [currentUser, fetchUserTrips]);
 
   const handleLogin = async () => {
     setIsAuthLoading(true);
-    // Safari on macOS and iOS blocks popup auth frames or closes popups immediately because of Intelligent Tracking Prevention.
-    const isSafari = /Safari/i.test(navigator.userAgent) && !/Chrome/i.test(navigator.userAgent);
-    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-
-    if (isSafari || isIOS) {
-      console.log("Safari/iOS device detected. Redirecting for robust & seamless login experience.");
-      try {
-        await signInWithRedirect(auth, googleProvider);
-      } catch (err) {
-        console.error("Redirect login error:", err);
-        setIsAuthLoading(false);
-      }
+    if (!isSupabaseConfigured) {
+      setIsAuthLoading(false);
       return;
     }
 
     try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (err: any) {
-      console.error("Popup login failed, initiating redirect fallback:", err);
-      // Fallback on blocks, closures, or popup errors
-      if (err.code === 'auth/popup-blocked' || err.code === 'auth/popup-closed-by-user' || err.message?.includes('popup')) {
-        try {
-          await signInWithRedirect(auth, googleProvider);
-        } catch (redirectErr) {
-          console.error("Redirect fallback login failed:", redirectErr);
-          setIsAuthLoading(false);
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin,
         }
-      } else {
-        setIsAuthLoading(false);
-      }
+      });
+      if (error) throw error;
+    } catch (err) {
+      console.error("Google OAuth login error:", err);
+      setIsAuthLoading(false);
     }
   };
 
@@ -1689,65 +1691,110 @@ export default function App() {
     localStorage.setItem('saigon_trip_info', JSON.stringify({ plannerName, arrivalDate, departureDate }));
   }, [plannerName, arrivalDate, departureDate]);
 
-  // Cloud Sync: Subscribe to Trip Metadata on Firestore
+  // Cloud Sync: Subscribe to Trip Metadata on Supabase
   useEffect(() => {
-    if (!tripId || viewMode !== 'planner') return;
+    if (!tripId || viewMode !== 'planner' || !isSupabaseConfigured) return;
 
     setTripAccessError(null);
 
-    const tripRef = doc(db, 'trips', tripId);
-    const unsubscribe = onSnapshot(tripRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setPlannerName((prev: string) => prev !== data.plannerName ? (data.plannerName || '') : prev);
-        setArrivalDate((prev: string) => prev !== data.arrivalDate ? (data.arrivalDate || '') : prev);
-        setDepartureDate((prev: string) => prev !== data.departureDate ? (data.departureDate || '') : prev);
-        setDestinationLabel((prev: string) => prev !== data.destination ? (data.destination || 'Saigon') : prev);
-        setIsShared(!!data.isShared);
-        
-        if (data.lat !== undefined) setDestinationLat(data.lat);
-        if (data.lng !== undefined) setDestinationLng(data.lng);
-        
-        if (data.baseCurrency !== undefined) setBaseCur(data.baseCurrency);
-        if (data.targetCurrency !== undefined) setTargetCur(data.targetCurrency);
-        if (data.conversionRate !== undefined) setConvRate(data.conversionRate);
+    const fetchAndSetupTrip = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('trips')
+          .select('*')
+          .eq('id', tripId)
+          .single();
 
-        // Auto-claim anonymous guest trips for the logged-in user
-        if (currentUser && (!data.ownerId || data.ownerId === 'guest')) {
-          setDoc(tripRef, { ownerId: currentUser.uid }, { merge: true }).catch(err => {
-            console.error("Failed to claim guest trip:", err);
-          });
+        if (error) {
+          // If the record doesn't exist, create it!
+          if (error.code === 'PGRST116') {
+            await supabase
+              .from('trips')
+              .insert([{
+                id: tripId,
+                plannerName,
+                arrivalDate,
+                departureDate,
+                destination: destinationLabel,
+                lat: destinationLat,
+                lng: destinationLng,
+                baseCurrency: baseCur,
+                targetCurrency: targetCur,
+                conversionRate: convRate,
+                ownerId: currentUser?.uid || 'guest',
+                isShared: false,
+                updatedAt: new Date().toISOString()
+              }]);
+          } else {
+            throw error;
+          }
+        } else if (data) {
+          setPlannerName((prev: string) => prev !== data.plannerName ? (data.plannerName || '') : prev);
+          setArrivalDate((prev: string) => prev !== data.arrivalDate ? (data.arrivalDate || '') : prev);
+          setDepartureDate((prev: string) => prev !== data.departureDate ? (data.departureDate || '') : prev);
+          setDestinationLabel((prev: string) => prev !== data.destination ? (data.destination || 'Saigon') : prev);
+          setIsShared(!!data.isShared);
+          
+          if (data.lat !== undefined && data.lat !== null) setDestinationLat(data.lat);
+          if (data.lng !== undefined && data.lng !== null) setDestinationLng(data.lng);
+          
+          if (data.baseCurrency !== undefined && data.baseCurrency !== null) setBaseCur(data.baseCurrency);
+          if (data.targetCurrency !== undefined && data.targetCurrency !== null) setTargetCur(data.targetCurrency);
+          if (data.conversionRate !== undefined && data.conversionRate !== null) setConvRate(data.conversionRate);
+
+          // Auto-claim anonymous guest trips for the logged-in user
+          if (currentUser && (!data.ownerId || data.ownerId === 'guest')) {
+            await supabase
+              .from('trips')
+              .update({ ownerId: currentUser.uid })
+              .eq('id', tripId);
+          }
         }
-      } else {
-        try {
-          setDoc(tripRef, {
-            plannerName,
-            arrivalDate,
-            departureDate,
-            destination: destinationLabel,
-            lat: destinationLat,
-            lng: destinationLng,
-            baseCurrency: baseCur,
-            targetCurrency: targetCur,
-            conversionRate: convRate,
-            ownerId: currentUser?.uid || 'guest',
-            isShared: false,
-            updatedAt: new Date().toISOString()
-          });
-        } catch (err) {
-          handleFirestoreError(err, OperationType.WRITE, `trips/${tripId}`);
+      } catch (err: any) {
+        console.error("Error fetching trip:", err);
+        const errStr = err?.message || String(err);
+        if (errStr.toLowerCase().includes("permission") || errStr.toLowerCase().includes("policy")) {
+          setTripAccessError("Access Denied: This travel plan is private. Please request the owner to toggle shared permissions.");
         }
       }
-    }, (error) => {
-      const errStr = error instanceof Error ? error.message : String(error);
-      if (errStr.toLowerCase().includes("permission-denied") || errStr.toLowerCase().includes("insufficient permissions") || errStr.toLowerCase().includes("missing or insufficient permissions")) {
-        setTripAccessError("Access Denied: This travel plan is private. Please request the owner to toggle shared permissions.");
-      } else {
-        handleFirestoreError(error, OperationType.GET, `trips/${tripId}`);
-      }
-    });
+    };
 
-    return () => unsubscribe();
+    fetchAndSetupTrip();
+
+    // Subscribe to metadata changes
+    const channel = supabase
+      .channel(`trip-metadata-${tripId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'trips',
+          filter: `id=eq.${tripId}`
+        },
+        (payload) => {
+          if (payload.new) {
+            const data = payload.new as any;
+            setPlannerName((prev: string) => prev !== data.plannerName ? (data.plannerName || '') : prev);
+            setArrivalDate((prev: string) => prev !== data.arrivalDate ? (data.arrivalDate || '') : prev);
+            setDepartureDate((prev: string) => prev !== data.departureDate ? (data.departureDate || '') : prev);
+            setDestinationLabel((prev: string) => prev !== data.destination ? (data.destination || 'Saigon') : prev);
+            setIsShared(!!data.isShared);
+            
+            if (data.lat !== undefined && data.lat !== null) setDestinationLat(data.lat);
+            if (data.lng !== undefined && data.lng !== null) setDestinationLng(data.lng);
+            
+            if (data.baseCurrency !== undefined && data.baseCurrency !== null) setBaseCur(data.baseCurrency);
+            if (data.targetCurrency !== undefined && data.targetCurrency !== null) setTargetCur(data.targetCurrency);
+            if (data.conversionRate !== undefined && data.conversionRate !== null) setConvRate(data.conversionRate);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      channel.unsubscribe();
+    };
   }, [tripId, viewMode, currentUser]);
 
   // Keep the latest copy of places to prevent stale closure in subscription callback
@@ -1758,63 +1805,101 @@ export default function App() {
 
   // Cloud Sync: Subscribe to Place Documents inside the shared trip subcollection
   useEffect(() => {
-    if (!tripId || viewMode !== 'planner') return;
+    if (!tripId || viewMode !== 'planner' || !isSupabaseConfigured) return;
 
-    const placesRef = collection(db, 'trips', tripId, 'places');
-    const unsubscribe = onSnapshot(placesRef, async (querySnap) => {
-      const fbPlaces: Place[] = [];
-      querySnap.forEach((docSnap) => {
-        fbPlaces.push(docSnap.data() as Place);
-      });
+    const fetchPlaces = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('places')
+          .select('*')
+          .eq('tripId', tripId);
+        
+        if (error) throw error;
+        const mappedPlaces = (data || []).map((p: any) => ({
+          id: p.id,
+          name: p.name,
+          address: p.address || undefined,
+          time: p.time || undefined,
+          district: p.district,
+          category: p.category,
+          day: p.day || undefined,
+          lat: p.lat || undefined,
+          lng: p.lng || undefined,
+        }));
+        setPlaces(mappedPlaces);
 
-      // Always update state to match Firestore to avoid leaks from former trips
-      setPlaces(fbPlaces);
-
-      // Safe first-time migration of local state to Cloud Firestore ONLY for initial guests
-      if (fbPlaces.length === 0 && !currentUser && tripId.startsWith('SG-')) {
-        const currentPlaces = placesRefVal.current;
-        if (currentPlaces.length > 0) {
-          const batch = writeBatch(db);
-          currentPlaces.forEach((p) => {
-            const docRef = doc(db, 'trips', tripId, 'places', p.id);
-            batch.set(docRef, p);
-          });
-          try {
-            await batch.commit();
-          } catch (err) {
-            handleFirestoreError(err, OperationType.WRITE, `trips/${tripId}/places`);
+        // Safe first-time migration of local state to Supabase ONLY for initial guests
+        if ((data || []).length === 0 && !currentUser && tripId.startsWith('SG-')) {
+          const currentPlaces = placesRefVal.current;
+          if (currentPlaces.length > 0) {
+            const inserts = currentPlaces.map((p) => ({
+              id: p.id,
+              tripId: tripId,
+              name: p.name,
+              address: p.address || null,
+              time: p.time || null,
+              district: p.district,
+              category: p.category,
+              day: p.day || null,
+              lat: p.lat || null,
+              lng: p.lng || null
+            }));
+            await supabase.from('places').insert(inserts);
           }
         }
+      } catch (err) {
+        console.error("Error reading places:", err);
       }
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, `trips/${tripId}/places`);
-    });
+    };
 
-    return () => unsubscribe();
+    fetchPlaces();
+
+    const channel = supabase
+      .channel(`trip-places-${tripId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'places',
+          filter: `tripId=eq.${tripId}`
+        },
+        () => {
+          fetchPlaces();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      channel.unsubscribe();
+    };
   }, [tripId, viewMode, currentUser]);
 
   // Cloud Sync: Push user keystrokes / edits for trip info with 1s debounce
   useEffect(() => {
-    if (!tripId || viewMode !== 'planner') return;
+    if (!tripId || viewMode !== 'planner' || !isSupabaseConfigured) return;
 
     const timeout = setTimeout(async () => {
       try {
-        await setDoc(doc(db, 'trips', tripId), {
-          plannerName,
-          arrivalDate,
-          departureDate,
-          destination: destinationLabel,
-          lat: destinationLat,
-          lng: destinationLng,
-          baseCurrency: baseCur,
-          targetCurrency: targetCur,
-          conversionRate: convRate,
-          ownerId: currentUser?.uid || 'guest',
-          isShared,
-          updatedAt: new Date().toISOString()
-         });
+        await supabase
+          .from('trips')
+          .upsert([{
+            id: tripId,
+            plannerName,
+            arrivalDate,
+            departureDate,
+            destination: destinationLabel,
+            lat: destinationLat,
+            lng: destinationLng,
+            baseCurrency: baseCur,
+            targetCurrency: targetCur,
+            conversionRate: convRate,
+            ownerId: currentUser?.uid || 'guest',
+            isShared,
+            updatedAt: new Date().toISOString()
+          }]);
       } catch (err) {
-        handleFirestoreError(err, OperationType.WRITE, `trips/${tripId}`);
+        console.error("Error upserting trip info:", err);
       }
     }, 1000);
 
@@ -1881,26 +1966,39 @@ export default function App() {
     setNewName('');
     setNewAddress('');
 
-    if (tripId) {
-      // clean any undefined properties for Firestore compatibility
-      const cleanPlace = { ...newPlace };
-      if (cleanPlace.address === undefined) delete cleanPlace.address;
-      if (cleanPlace.day === undefined) delete cleanPlace.day;
-      if (cleanPlace.time === undefined) delete cleanPlace.time;
-      if (cleanPlace.expanded === undefined) delete cleanPlace.expanded;
-      if (cleanPlace.lat === undefined) delete cleanPlace.lat;
-      if (cleanPlace.lng === undefined) delete cleanPlace.lng;
+    if (tripId && isSupabaseConfigured) {
+      const cleanPlace = {
+        id: newPlace.id,
+        tripId: tripId,
+        name: newPlace.name,
+        address: newPlace.address || null,
+        time: newPlace.time || null,
+        district: newPlace.district,
+        category: newPlace.category,
+        day: newPlace.day || null,
+        lat: newPlace.lat || null,
+        lng: newPlace.lng || null
+      };
 
-      setDoc(doc(db, 'trips', tripId, 'places', newPlace.id), cleanPlace)
-        .catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${tripId}/places/${newPlace.id}`));
+      supabase
+        .from('places')
+        .insert([cleanPlace])
+        .then(({ error }) => {
+          if (error) handleSupabaseError(error, OperationType.WRITE, `places/${newPlace.id}`);
+        });
     }
   };
 
   const deletePlace = (id: string) => {
     setPlaces(prev => prev.filter(p => p.id !== id));
-    if (tripId) {
-      deleteDoc(doc(db, 'trips', tripId, 'places', id))
-        .catch(err => handleFirestoreError(err, OperationType.DELETE, `trips/${tripId}/places/${id}`));
+    if (tripId && isSupabaseConfigured) {
+      supabase
+        .from('places')
+        .delete()
+        .eq('id', id)
+        .then(({ error }) => {
+          if (error) handleSupabaseError(error, OperationType.DELETE, `places/${id}`);
+        });
     }
   };
 
@@ -1912,10 +2010,14 @@ export default function App() {
           delete updated.day;
           delete updated.time;
           
-          if (tripId) {
-            // Write to Firestore to persist clearing
-            setDoc(doc(db, 'trips', tripId, 'places', p.id), updated)
-              .catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${tripId}/places/${p.id}`));
+          if (tripId && isSupabaseConfigured) {
+            supabase
+              .from('places')
+              .update({ day: null, time: null })
+              .eq('id', p.id)
+              .then(({ error }) => {
+                if (error) handleSupabaseError(error, OperationType.WRITE, `places/${p.id}`);
+              });
           }
           return updated;
         }
@@ -1925,70 +2027,33 @@ export default function App() {
   };
 
   const toggleExpand = (id: string) => {
-    setPlaces(prev => {
-      const updated = prev.map(p => p.id === id ? { ...p, expanded: !p.expanded } : p);
-      if (tripId) {
-        const target = updated.find(p => p.id === id);
-        if (target) {
-          const cleanTarget = { ...target };
-          if (cleanTarget.address === undefined) delete cleanTarget.address;
-          if (cleanTarget.day === undefined) delete cleanTarget.day;
-          if (cleanTarget.time === undefined) delete cleanTarget.time;
-          if (cleanTarget.expanded === undefined) delete cleanTarget.expanded;
-          if (cleanTarget.lat === undefined) delete cleanTarget.lat;
-          if (cleanTarget.lng === undefined) delete cleanTarget.lng;
-          setDoc(doc(db, 'trips', tripId, 'places', id), cleanTarget)
-            .catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${tripId}/places/${id}`));
-        }
-      }
-      return updated;
-    });
+    setPlaces(prev => prev.map(p => p.id === id ? { ...p, expanded: !p.expanded } : p));
   };
 
   const updatePlaceDay = (id: string, day?: Day) => {
-    setPlaces(prev => {
-      const updated = prev.map(p => p.id === id ? { ...p, day } : p);
-      if (tripId) {
-        const target = updated.find(p => p.id === id);
-        if (target) {
-          const cleanTarget = { ...target };
-          if (day === undefined) {
-            delete cleanTarget.day;
-          } else {
-            cleanTarget.day = day;
-          }
-          if (cleanTarget.address === undefined) delete cleanTarget.address;
-          if (cleanTarget.time === undefined) delete cleanTarget.time;
-          if (cleanTarget.expanded === undefined) delete cleanTarget.expanded;
-          if (cleanTarget.lat === undefined) delete cleanTarget.lat;
-          if (cleanTarget.lng === undefined) delete cleanTarget.lng;
-          setDoc(doc(db, 'trips', tripId, 'places', id), cleanTarget)
-            .catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${tripId}/places/${id}`));
-        }
-      }
-      return updated;
-    });
+    setPlaces(prev => prev.map(p => p.id === id ? { ...p, day } : p));
+    if (tripId && isSupabaseConfigured) {
+      supabase
+        .from('places')
+        .update({ day: day || null })
+        .eq('id', id)
+        .then(({ error }) => {
+          if (error) handleSupabaseError(error, OperationType.WRITE, `places/${id}`);
+        });
+    }
   };
 
   const updatePlaceTime = (id: string, time: string) => {
-    setPlaces(prev => {
-      const updated = prev.map(p => p.id === id ? { ...p, time } : p);
-      if (tripId) {
-        const target = updated.find(p => p.id === id);
-        if (target) {
-          const cleanTarget = { ...target };
-          cleanTarget.time = time;
-          if (cleanTarget.address === undefined) delete cleanTarget.address;
-          if (cleanTarget.day === undefined) delete cleanTarget.day;
-          if (cleanTarget.expanded === undefined) delete cleanTarget.expanded;
-          if (cleanTarget.lat === undefined) delete cleanTarget.lat;
-          if (cleanTarget.lng === undefined) delete cleanTarget.lng;
-          setDoc(doc(db, 'trips', tripId, 'places', id), cleanTarget)
-            .catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${tripId}/places/${id}`));
-        }
-      }
-      return updated;
-    });
+    setPlaces(prev => prev.map(p => p.id === id ? { ...p, time } : p));
+    if (tripId && isSupabaseConfigured) {
+      supabase
+        .from('places')
+        .update({ time: time || null })
+        .eq('id', id)
+        .then(({ error }) => {
+          if (error) handleSupabaseError(error, OperationType.WRITE, `places/${id}`);
+        });
+    }
   };
 
   // Drag Handlers
@@ -2098,7 +2163,10 @@ export default function App() {
                 }} 
                 onDeleteTrip={async (id) => {
                   try {
-                    await deleteDoc(doc(db, 'trips', id));
+                    if (isSupabaseConfigured) {
+                      await supabase.from('places').delete().eq('tripId', id);
+                      await supabase.from('trips').delete().eq('id', id);
+                    }
                   } catch (err) {
                     console.error("Delete trip failed:", err);
                   }
@@ -2272,7 +2340,9 @@ export default function App() {
                         try {
                           localStorage.removeItem('saigon_custom_user');
                           setCurrentUser(null);
-                          await signOut(auth);
+                          if (isSupabaseConfigured) {
+                            await supabase.auth.signOut();
+                          }
                         } catch (err) {
                           console.error("Signout error:", err);
                         }
@@ -2333,21 +2403,12 @@ export default function App() {
                           const checked = e.target.checked;
                           setIsShared(checked);
                           try {
-                            const tripRef = doc(db, 'trips', tripId);
-                            await setDoc(tripRef, {
-                              plannerName,
-                              arrivalDate,
-                              departureDate,
-                              destination: destinationLabel,
-                              lat: destinationLat,
-                              lng: destinationLng,
-                              baseCurrency: baseCur,
-                              targetCurrency: targetCur,
-                              conversionRate: convRate,
-                              ownerId: currentUser?.uid || 'guest',
-                              isShared: checked,
-                              updatedAt: new Date().toISOString()
-                            });
+                            if (isSupabaseConfigured) {
+                              await supabase
+                                .from('trips')
+                                .update({ isShared: checked, updatedAt: new Date().toISOString() })
+                                .eq('id', tripId);
+                            }
                           } catch (err) {
                             console.error("Failed to update share status:", err);
                           }
@@ -2616,17 +2677,26 @@ export default function App() {
                                           });
 
                                         if (trulyNewPlaces.length > 0) {
-                                          if (tripId) {
-                                            const batch = writeBatch(db);
-                                            trulyNewPlaces.forEach((tp) => {
-                                              const cleanPlace = { ...tp };
-                                              if (cleanPlace.day === undefined) delete cleanPlace.day;
-                                              if (cleanPlace.time === undefined) delete cleanPlace.time;
-                                              if (cleanPlace.address === undefined) delete cleanPlace.address;
-                                              const docRef = doc(db, 'trips', tripId, 'places', tp.id);
-                                              batch.set(docRef, cleanPlace);
-                                            });
-                                            batch.commit().catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${tripId}/places`));
+                                          if (tripId && isSupabaseConfigured) {
+                                            const sbInserts = trulyNewPlaces.map((tp) => ({
+                                              id: tp.id,
+                                              tripId: tripId,
+                                              name: tp.name,
+                                              address: tp.address || null,
+                                              time: tp.time || null,
+                                              district: tp.district,
+                                              category: tp.category,
+                                              day: tp.day || null,
+                                              lat: tp.lat || null,
+                                              lng: tp.lng || null
+                                            }));
+                                            supabase
+                                              .from('places')
+                                              .insert(sbInserts)
+                                              .then(({ error }) => {
+                                                if (error) handleSupabaseError(error, OperationType.WRITE, 'places');
+                                              });
+
                                           }
                                           return [...prev, ...trulyNewPlaces];
                                         }
@@ -2694,13 +2764,23 @@ export default function App() {
                                               lng: rec.lng !== undefined ? rec.lng : (coords.lng + (Math.random() - 0.5) * 0.006)
                                             };
 
-                                            if (tripId) {
-                                              const cleanPlace = { ...newPlace };
-                                              if (cleanPlace.day === undefined) delete cleanPlace.day;
-                                              if (cleanPlace.time === undefined) delete cleanPlace.time;
-                                              if (cleanPlace.address === undefined) delete cleanPlace.address;
-                                              setDoc(doc(db, 'trips', tripId, 'places', newPlace.id), cleanPlace)
-                                                .catch(err => handleFirestoreError(err, OperationType.WRITE, `trips/${tripId}/places/${newPlace.id}`));
+                                            if (tripId && isSupabaseConfigured) {
+                                              const cleanPlace = {
+                                                id: newPlace.id,
+                                                tripId: tripId,
+                                                name: newPlace.name,
+                                                address: newPlace.address || null,
+                                                time: newPlace.time || null,
+                                                district: newPlace.district,
+                                                category: newPlace.category,
+                                                day: newPlace.day || null,
+                                                lat: newPlace.lat || null,
+                                                lng: newPlace.lng || null
+                                              };
+                                              supabase
+                                                .from('places')
+                                                .insert([cleanPlace]).then(({ error }) => { if (error) handleSupabaseError(error, OperationType.WRITE, `places/${newPlace.id}`); }) //
+// catch removed
                                             }
 
                                             return [...prev, newPlace];
@@ -3233,31 +3313,36 @@ export default function App() {
                       setIsAuthLoading(false);
                       return;
                     }
-                    const res = await createUserWithEmailAndPassword(auth, authEmail, authPassword);
-                    if (authName && res.user) {
-                      await updateProfile(res.user, { displayName: authName });
+                    if (isSupabaseConfigured) {
+                      const { data, error } = await supabase.auth.signUp({
+                        email: authEmail,
+                        password: authPassword,
+                        options: {
+                          data: {
+                            displayName: authName || 'Explorer',
+                            name: authName || 'Explorer'
+                          }
+                        }
+                      });
+                      if (error) throw error;
+                      if (!data.user) throw new Error('Sign up failed');
+                      setCurrentUser(mapSupabaseUser(data.user));
                     }
-                    setCurrentUser({ ...res.user, displayName: authName });
                   } else {
-                    const res = await signInWithEmailAndPassword(auth, authEmail, authPassword);
-                    setCurrentUser(res.user);
+                    if (isSupabaseConfigured) {
+                      const { data, error } = await supabase.auth.signInWithPassword({
+                        email: authEmail,
+                        password: authPassword
+                      });
+                      if (error) throw error;
+                      if (!data.user) throw new Error('Sign in failed');
+                      setCurrentUser(mapSupabaseUser(data.user));
+                    }
                   }
                   setIsLoginModalOpen(false);
                 } catch (err: any) {
                   console.error("Auth modal error:", err);
-                  let errMsg = err.message || 'Authentication failed';
-                  if (err.code === 'auth/operation-not-allowed') {
-                    errMsg = 'Email/Password sign-in provider is not enabled in your Firebase project. Please enable "Email/Password" under the Authentication > Sign-in method tab in the Firebase Console!';
-                  } else if (err.code === 'auth/unauthorized-domain' || errMsg.toLowerCase().includes('unauthorized-domain')) {
-                    errMsg = 'This domain is unauthorized. Please whitelist your development/hosting domain in your Firebase Console under Authentication > Settings > Authorized Domains!';
-                  } else if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
-                    errMsg = 'Invalid email/password, or account does not exist. Please check your inputs or sign up for a new account!';
-                  } else if (err.code === 'auth/wrong-password') {
-                    errMsg = 'Incorrect password. Please try again.';
-                  } else if (err.code === 'auth/email-already-in-use') {
-                    errMsg = 'Email address is already in use by another account.';
-                  }
-                  setAuthError(errMsg);
+                  setAuthError(err?.message || 'Authentication failed');
                 } finally {
                   setIsAuthLoading(false);
                 }
@@ -3343,31 +3428,19 @@ export default function App() {
                 onClick={async () => {
                   setIsLoginModalOpen(false);
                   setIsAuthLoading(true);
-                  const isSafari = /Safari/i.test(navigator.userAgent) && !/Chrome/i.test(navigator.userAgent);
-                  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-
-                  if (isSafari || isIOS) {
-                    try {
-                      await signInWithRedirect(auth, googleProvider);
-                    } catch (err) {
-                      console.error("Redirect login error:", err);
-                      setIsAuthLoading(false);
-                    }
-                    return;
-                  }
-
                   try {
-                    await signInWithPopup(auth, googleProvider);
-                  } catch (err: any) {
-                    if (err.code === 'auth/popup-blocked' || err.code === 'auth/popup-closed-by-user' || err.message?.includes('popup')) {
-                      try {
-                        await signInWithRedirect(auth, googleProvider);
-                      } catch (redirectErr) {
-                        setIsAuthLoading(false);
-                      }
-                    } else {
-                      setIsAuthLoading(false);
+                    if (isSupabaseConfigured) {
+                      const { error } = await supabase.auth.signInWithOAuth({
+                        provider: 'google',
+                        options: {
+                          redirectTo: window.location.origin
+                        }
+                      });
+                      if (error) throw error;
                     }
+                  } catch (err) {
+                    console.error("Popup login failed:", err);
+                    setIsAuthLoading(false);
                   }
                 }}
                 className="w-full flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-2 rounded-xl transition-all cursor-pointer border border-slate-200"
@@ -3472,8 +3545,6 @@ export default function App() {
 
                 const newTripId = 'TRIP-' + Math.random().toString(36).substr(2, 6).toUpperCase();
                 try {
-                  const tripRef = doc(db, 'trips', newTripId);
-                  
                   // Setup dynamic currency mappings based on destination text bias
                   let targetCurrency = 'EUR';
                   let baseCurrency = 'USD';
@@ -3498,19 +3569,26 @@ export default function App() {
                     conversionRate = 0.79;
                   }
 
-                  await setDoc(tripRef, {
-                    plannerName: createTripName,
-                    destination: createTripDestinationLabel || 'Custom Destination',
-                    lat: createTripLat,
-                    lng: createTripLng,
-                    arrivalDate: createTripArrival,
-                    departureDate: createTripDeparture,
-                    baseCurrency,
-                    targetCurrency,
-                    conversionRate,
-                    ownerId: currentUser?.uid || 'guest',
-                    updatedAt: new Date().toISOString()
-                  });
+                  if (isSupabaseConfigured) {
+                    const { error } = await supabase
+                      .from('trips')
+                      .insert([{
+                        id: newTripId,
+                        plannerName: createTripName,
+                        destination: createTripDestinationLabel || 'Custom Destination',
+                        lat: createTripLat,
+                        lng: createTripLng,
+                        arrivalDate: createTripArrival,
+                        departureDate: createTripDeparture,
+                        baseCurrency,
+                        targetCurrency,
+                        conversionRate,
+                        ownerId: currentUser?.uid || 'guest',
+                        isShared: false,
+                        updatedAt: new Date().toISOString()
+                      }]);
+                    if (error) throw error;
+                  }
 
                   // Clear current list to load blank destination context cleanly
                   setPlaces([]);

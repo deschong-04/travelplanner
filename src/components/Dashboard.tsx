@@ -14,8 +14,7 @@ import {
   Plane
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { auth } from '../firebase';
-import { signOut } from 'firebase/auth';
+import { supabase } from '../supabase';
 
 interface Trip {
   id: string;
@@ -133,7 +132,7 @@ export default function Dashboard({
   const handleSignOut = async () => {
     try {
       localStorage.removeItem('saigon_custom_user');
-      await signOut(auth);
+      await supabase.auth.signOut();
       window.location.reload();
     } catch (err) {
       console.error("Signout fail:", err);
