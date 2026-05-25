@@ -21,9 +21,10 @@
     <link rel="apple-touch-icon" sizes="167x167" href="/touch-icon-ipad-pro.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
 
-    <!-- Prevent tap highlight and text selection on UI elements -->
+    <!-- Prevent tap highlight and iOS font scaling -->
     <style>
       * { -webkit-tap-highlight-color: transparent; }
+      html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
       body { overscroll-behavior-y: none; }
     </style>
   </head>

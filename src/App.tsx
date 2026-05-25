@@ -2183,7 +2183,7 @@ export default function App() {
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        <main className="max-w-6xl mx-auto p-6 md:p-8 grid lg:grid-cols-[1fr_300px] gap-6 lg:gap-10">
+        <main className="max-w-6xl mx-auto p-4 sm:p-6 md:p-8 grid lg:grid-cols-[1fr_300px] gap-5 lg:gap-10">
           
           {/* Main Content Area */}
           <div className="space-y-6 min-w-0">

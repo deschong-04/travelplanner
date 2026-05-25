@@ -12,8 +12,28 @@
 }
 
 @layer base {
+  /* Scale up the root font size on mobile so all rem/em units grow proportionally */
+  html {
+    font-size: 16px;
+  }
+  @media (max-width: 640px) {
+    html {
+      font-size: 18px;
+    }
+  }
+
   body {
     @apply font-sans antialiased bg-bg text-ink;
+  }
+
+  /* Larger tap targets on mobile */
+  @media (max-width: 640px) {
+    button, [role="button"], input, select, a {
+      min-height: 44px;
+    }
+    input[type="time"], input[type="date"], input[type="text"], input[type="search"] {
+      font-size: 16px; /* prevents iOS auto-zoom on focus */
+    }
   }
 }
 
