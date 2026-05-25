@@ -1,33 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { 
-  Plus, 
-  Trash2, 
-  ChevronRight, 
-  ArrowRightLeft, 
-  DollarSign, 
-  MapPin, 
-  Tag, 
-  Calendar,
-  ChevronDown,
-  ChevronUp,
-  Clock,
-  X,
-  GripVertical,
-  Search,
-  Map as MapIcon,
-  ExternalLink,
-  Compass,
-  Navigation,
-  Car,
-  MoreHorizontal,
-  Copy,
-  Check,
-  Users,
-  Edit2,
-  ArrowRight,
-  ArrowLeft,
-  Lock
-} from 'lucide-react';
+import { Plus, Trash2, ChevronRight, ArrowRightLeft, DollarSign, MapPin, Tag, Calendar, ChevronDown, ChevronUp, Clock, X, GripVertical, Search, Map as MapIcon, ExternalLink, Compass, Navigation, Car, MoveHorizontal as MoreHorizontal, Copy, Check, Users, CreditCard as Edit2, ArrowRight, ArrowLeft, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { APIProvider, useMapsLibrary, Map, AdvancedMarker, Pin, InfoWindow, useMap } from '@vis.gl/react-google-maps';
 import {
@@ -1470,9 +1442,14 @@ export default function App() {
 
     setIsAuthLoading(true);
 
-    // Initial session retrieval
+    // Initial session retrieval with timeout fallback
+    const sessionTimeout = setTimeout(() => setIsAuthLoading(false), 4000);
     supabase.auth.getSession().then(({ data: { session } }) => {
+      clearTimeout(sessionTimeout);
       setCurrentUser(mapSupabaseUser(session?.user));
+      setIsAuthLoading(false);
+    }).catch(() => {
+      clearTimeout(sessionTimeout);
       setIsAuthLoading(false);
     });
 
