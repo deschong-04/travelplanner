@@ -1,8 +1,20 @@
 {
-  "short_name": "Saigon Travel",
-  "name": "Saigon Travel Master Planner",
-  "description": "A premium 4D3N travel planner for Saigon with live currency conversion and interactive master database.",
+  "short_name": "Travel Planner",
+  "name": "Travel Itinerary Planner",
+  "description": "Plan and organize your travel itineraries with maps, places, and smart scheduling.",
   "icons": [
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "maskable"
+    },
     {
       "src": "/icon-512.png",
       "type": "image/png",
@@ -10,15 +22,17 @@
       "purpose": "any"
     },
     {
-      "src": "/icon-192.png",
+      "src": "/icon-512.png",
       "type": "image/png",
-      "sizes": "192x192",
-      "purpose": "any"
+      "sizes": "512x512",
+      "purpose": "maskable"
     }
   ],
   "start_url": "/",
+  "scope": "/",
   "background_color": "#0f172a",
-  "theme_color": "#6366f1",
+  "theme_color": "#0f172a",
   "display": "standalone",
-  "orientation": "portrait"
+  "orientation": "portrait",
+  "categories": ["travel", "productivity"]
 }

@@ -4,26 +4,31 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Travel Planner</title>
-    
-    <!-- PWA primary configuration -->
+
+    <!-- PWA manifest -->
     <link rel="manifest" href="/manifest.json" />
-    <meta name="theme-color" content="#6366f1" />
-    
-    <!-- Apple home-screen web-clip and standalone behavior settings -->
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <!-- Apple Web Clip (iOS home screen) -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Travel Planner" />
-    <!-- Standard Home Screen Icon -->
+
+    <!-- Apple touch icons -->
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <!-- For iPhone SE, Older iPhones, and iPads (152x152) -->
     <link rel="apple-touch-icon" sizes="152x152" href="/touch-icon-ipad.png" />
-    <!-- For Modern iPhones (167x167 / 180x180) -->
     <link rel="apple-touch-icon" sizes="167x167" href="/touch-icon-ipad-pro.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+
+    <!-- Prevent tap highlight and text selection on UI elements -->
+    <style>
+      * { -webkit-tap-highlight-color: transparent; }
+      body { overscroll-behavior-y: none; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-
