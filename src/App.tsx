@@ -64,16 +64,16 @@ const DISTRICT_COORDS: Record<District, { lat: number; lng: number }> = {
 
 // --- Day Helper ---
 function getDayList(arrival: string, departure: string): string[] {
-  const start = new Date(arrival);
-  const end = new Date(departure);
-  
+  const start = new Date(arrival + 'T00:00:00');
+  const end = new Date(departure + 'T00:00:00');
+
   if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
     return ['Day 1'];
   }
-  
+
   const diffTime = Math.abs(end.getTime() - start.getTime());
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-  
+
   return Array.from({ length: diffDays }, (_, i) => `Day ${i + 1}`);
 }
 
@@ -1596,19 +1596,25 @@ export default function App() {
 
   const DAYS = useMemo(() => getDayList(arrivalDate, departureDate), [arrivalDate, departureDate]);
 
-  // Set active tab to today's day if today falls within the trip range, otherwise first day
-  useEffect(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const arrival = arrivalDate ? new Date(arrivalDate + 'T00:00:00') : null;
-    const departure = departureDate ? new Date(departureDate + 'T00:00:00') : null;
+  // Track whether we've done the initial tab selection so editing dates doesn't jump the view
+  const didInitTab = useRef(false);
 
-    if (arrival && departure && today >= arrival && today <= departure) {
-      const dayIndex = Math.round((today.getTime() - arrival.getTime()) / (24 * 60 * 60 * 1000)) + 1;
-      const todayTab = `Day ${dayIndex}`;
-      if (DAYS.includes(todayTab)) {
-        setActiveTab(todayTab);
-        return;
+  // Set active tab to today's day only on initial load; afterwards just keep the active tab valid
+  useEffect(() => {
+    if (!didInitTab.current) {
+      didInitTab.current = true;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const arrival = arrivalDate ? new Date(arrivalDate + 'T00:00:00') : null;
+      const departure = departureDate ? new Date(departureDate + 'T00:00:00') : null;
+
+      if (arrival && departure && today >= arrival && today <= departure) {
+        const dayIndex = Math.round((today.getTime() - arrival.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+        const todayTab = `Day ${dayIndex}`;
+        if (DAYS.includes(todayTab)) {
+          setActiveTab(todayTab);
+          return;
+        }
       }
     }
 
@@ -2378,7 +2384,7 @@ export default function App() {
                 
                 <div className="hidden sm:block">
                   <Badge className="bg-[#DBEAFE] text-[#1E40AF] px-4 py-2 text-[11px] shadow-sm whitespace-nowrap">
-                    {new Date(arrivalDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} • Master Log
+                    {new Date(arrivalDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} • Master Log
                   </Badge>
                 </div>
               </div>
