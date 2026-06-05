@@ -1374,26 +1374,26 @@ export default function App() {
     }
   }, [tripId, viewMode]);
 
+  // Keep a ref so the heartbeat/track always uses the latest user identity
+  // without the presence channel being torn down on every auth state change.
+  const currentUserRef = useRef<any>(null);
+  useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
+
   // Subscribe and write to real-time presence collection
   useEffect(() => {
     if (!tripId || !isSupabaseConfigured) return;
 
-    // Use the authenticated user's UID so all their devices map to one presence slot.
-    // Fall back to the stable clientId for unauthenticated guests.
-    const presenceKey = currentUser?.uid || clientId;
-
     const channel = supabase.channel(`presence:${tripId}`, {
-      config: {
-        presence: {
-          key: presenceKey,
-        },
-      },
+      config: { presence: { key: clientId } },
     });
 
     const updatePresence = async () => {
       try {
+        // userId deduplicates across devices; clientId is per-tab fallback for guests.
+        const userId = currentUserRef.current?.uid || clientId;
         await channel.track({
-          id: presenceKey,
+          id: clientId,
+          userId,
           name: activeDisplayName,
           avatar: activePhotoURL || '',
           activeAt: new Date().toISOString()
@@ -1407,15 +1407,15 @@ export default function App() {
       .on('presence', { event: 'sync' }, () => {
         const state = channel.presenceState();
         const now = Date.now();
-        // Each key may have multiple entries (one per connection). Keep only the
-        // most-recent entry per key so the same user on multiple devices shows once.
+        // Deduplicate by userId so the same account on multiple devices shows once.
         const seen = new Map<string, any>();
-        Object.values(state).flat().forEach((user: any) => {
-          const activeTime = new Date(user.activeAt || Date.now()).getTime();
+        Object.values(state).flat().forEach((entry: any) => {
+          const activeTime = new Date(entry.activeAt || Date.now()).getTime();
           if (now - activeTime < 180000) {
-            const existing = seen.get(user.id);
+            const dedupeKey = entry.userId || entry.id;
+            const existing = seen.get(dedupeKey);
             if (!existing || activeTime > new Date(existing.activeAt || 0).getTime()) {
-              seen.set(user.id, user);
+              seen.set(dedupeKey, entry);
             }
           }
         });
@@ -1434,7 +1434,7 @@ export default function App() {
       clearInterval(heartbeat);
       channel.unsubscribe();
     };
-  }, [tripId, activeDisplayName, activePhotoURL, clientId, currentUser]);
+  }, [tripId, activeDisplayName, activePhotoURL, clientId]);
 
 
   // Authenticate user changes
@@ -2446,13 +2446,15 @@ export default function App() {
                     <div className="flex flex-wrap items-center gap-1.5">
                       {collaborators.map((collab) => {
                         const init = collab.name ? collab.name.charAt(0).toUpperCase() : '?';
-                        const isMe = collab.id === (currentUser?.uid || clientId);
+                        const myUserId = currentUser?.uid || clientId;
+                        const collabKey = collab.userId || collab.id;
+                        const isMe = collabKey === myUserId;
                         return (
                           <div
                             key={collab.id}
                             className={`w-7 h-7 rounded-full border-2 ${isMe ? 'border-indigo-500 ring-2 ring-indigo-100' : 'border-white'} flex items-center justify-center text-[10px] font-bold text-white shrink-0 relative group cursor-help`}
                             style={{ 
-                              backgroundColor: collab.id === (currentUser?.uid || clientId) ? '#4F46E5' : `hsl(${(collab.id.charCodeAt(0) * 40) % 360}, 65%, 50%)`
+                              backgroundColor: isMe ? '#4F46E5' : `hsl(${(collabKey.charCodeAt(0) * 40) % 360}, 65%, 50%)`
                             }}
                           >
                             {collab.avatar ? (
