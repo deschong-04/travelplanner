@@ -1584,12 +1584,26 @@ export default function App() {
 
   const DAYS = useMemo(() => getDayList(arrivalDate, departureDate), [arrivalDate, departureDate]);
 
-  // Ensure active tab is valid when DAYS change
+  // Set active tab to today's day if today falls within the trip range, otherwise first day
   useEffect(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const arrival = arrivalDate ? new Date(arrivalDate + 'T00:00:00') : null;
+    const departure = departureDate ? new Date(departureDate + 'T00:00:00') : null;
+
+    if (arrival && departure && today >= arrival && today <= departure) {
+      const dayIndex = Math.round((today.getTime() - arrival.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+      const todayTab = `Day ${dayIndex}`;
+      if (DAYS.includes(todayTab)) {
+        setActiveTab(todayTab);
+        return;
+      }
+    }
+
     if (!DAYS.includes(activeTab)) {
       setActiveTab(DAYS[0] || 'Day 1');
     }
-  }, [DAYS, activeTab]);
+  }, [DAYS]);
   
   // New Row State
   const [newName, setNewName] = useState('');
@@ -1707,28 +1721,8 @@ export default function App() {
           }
         } else if (data) {
           setPlannerName((prev: string) => prev !== data.plannerName ? (data.plannerName || '') : prev);
-
-          // If the stored arrival date is in the past, shift both dates forward so
-          // the trip starts today while preserving the original trip duration.
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          const storedArrival = data.arrivalDate ? new Date(data.arrivalDate + 'T00:00:00') : null;
-          const storedDeparture = data.departureDate ? new Date(data.departureDate + 'T00:00:00') : null;
-          if (storedArrival && storedArrival < today) {
-            const duration = storedDeparture && storedArrival
-              ? storedDeparture.getTime() - storedArrival.getTime()
-              : 3 * 24 * 60 * 60 * 1000;
-            const newDeparture = new Date(today.getTime() + duration);
-            const newArrivalStr = today.toISOString().split('T')[0];
-            const newDepartureStr = newDeparture.toISOString().split('T')[0];
-            setArrivalDate(newArrivalStr);
-            setDepartureDate(newDepartureStr);
-            // Persist the updated dates back to Supabase
-            await supabase.from('trips').update({ arrivalDate: newArrivalStr, departureDate: newDepartureStr, updatedAt: new Date().toISOString() }).eq('id', tripId);
-          } else {
-            setArrivalDate((prev: string) => prev !== data.arrivalDate ? (data.arrivalDate || '') : prev);
-            setDepartureDate((prev: string) => prev !== data.departureDate ? (data.departureDate || '') : prev);
-          }
+          setArrivalDate((prev: string) => prev !== data.arrivalDate ? (data.arrivalDate || '') : prev);
+          setDepartureDate((prev: string) => prev !== data.departureDate ? (data.departureDate || '') : prev);
           setDestinationLabel((prev: string) => prev !== data.destination ? (data.destination || 'Saigon') : prev);
           setIsShared(!!data.isShared);
           
