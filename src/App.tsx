@@ -2787,8 +2787,19 @@ export default function App() {
                                     )}
                                   </button>
                                   {generateError && (
-                                    <div className="sm:col-span-2 text-center py-3">
-                                      <div className="text-red-500 text-xs font-medium">{generateError}</div>
+                                    <div className="sm:col-span-2 flex items-start gap-3 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+                                      <div className="mt-0.5 w-4 h-4 flex-shrink-0 rounded-full bg-red-100 flex items-center justify-center">
+                                        <span className="text-red-500 text-[9px] font-black leading-none">!</span>
+                                      </div>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-[11px] font-semibold text-red-700 leading-snug">{generateError}</p>
+                                        <button
+                                          onClick={() => { setGenerateError(null); fetchMoreSuggestions(); }}
+                                          className="mt-1 text-[10px] font-bold text-red-500 hover:text-red-700 underline underline-offset-2"
+                                        >
+                                          Try again
+                                        </button>
+                                      </div>
                                     </div>
                                   )}
                                   {visibleSuggestions.length === 0 && !isGenerating && !generateError && (

@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -22,44 +22,45 @@ const ai = new GoogleGenAI({
 
 // API route for generating suggestions
 app.post("/api/suggestions", async (req, res) => {
+  if (!process.env.GEMINI_API_KEY) {
+    return res.status(503).json({ error: 'Gemini API key is not configured. Add GEMINI_API_KEY to your .env file.' });
+  }
   try {
     const { currentPlaces, destination } = req.body;
     const dest = destination || "Ho Chi Minh City (Saigon), Vietnam";
-    
-    const prompt = `You are an expert travel guide for ${dest}. 
-    Based on the following existing places in the user's travel master planner, generate 10 more unique and highly recommended places to visit.
-    
-    Existing places: ${JSON.stringify(currentPlaces)}
-    
-    Include a mix of hidden gems, popular spots, and varied categories like: Food, Fashion, Coffee, Spa, Sightseeing, and Nightlife.
-    Ensure districts or areas correspond to real, popular neighborhoods in ${dest}.`;
+
+    const prompt = `You are an expert travel guide for ${dest}.
+Based on the following existing places in the user's travel master planner, generate exactly 10 more unique and highly recommended places to visit in ${dest}.
+
+Existing places: ${JSON.stringify(currentPlaces)}
+
+Include a mix of hidden gems, popular spots, and varied categories like: Food, Fashion, Coffee, Spa, Sightseeing, and Nightlife.
+Each district/area must be a real, popular neighbourhood in ${dest}.
+
+Return ONLY a valid JSON array with no markdown or extra text. Each item must have these exact keys:
+- "name": place name (string)
+- "district": neighbourhood or area name (string)
+- "category": one of Food, Fashion, Coffee, Spa, Sightseeing, Nightlife (string)
+- "address": full street address (string)`;
 
     const response = await ai.models.generateContent({
       model: "gemini-2.0-flash",
       contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              name: { type: Type.STRING },
-              district: { type: Type.STRING },
-              category: { type: Type.STRING },
-              address: { type: Type.STRING },
-            },
-            required: ["name", "district", "category", "address"]
-          }
-        }
-      }
+      config: { responseMimeType: "application/json" },
     });
 
-    const suggestions = JSON.parse(response.text || "[]");
-    res.json(suggestions);
+    const text = response.text?.trim() || "[]";
+    const suggestions = JSON.parse(text);
+    res.json(Array.isArray(suggestions) ? suggestions : []);
   } catch (error: any) {
     console.error("Error generating suggestions:", error);
-    res.status(500).json({ error: error.message });
+    const msg = error?.message || 'Unknown error';
+    const friendly = msg.includes('API_KEY') || msg.includes('401')
+      ? 'Invalid Gemini API key. Check your GEMINI_API_KEY in .env.'
+      : msg.includes('quota') || msg.includes('429')
+      ? 'Gemini API quota exceeded. Try again later.'
+      : 'Generation failed. Please try again.';
+    res.status(500).json({ error: friendly });
   }
 });
 
