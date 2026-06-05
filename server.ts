@@ -11,19 +11,12 @@ const PORT = 3000;
 
 app.use(express.json());
 
-function getAI() {
-  dotenv.config({ override: true });
-  return new GoogleGenAI({
-    apiKey: process.env.GEMINI_API_KEY,
-    httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
-  });
-}
-
 // API route for generating suggestions
 app.post("/api/suggestions", async (req, res) => {
   dotenv.config({ override: true });
-  if (!process.env.GEMINI_API_KEY) {
-    return res.status(503).json({ error: 'Gemini API key is not configured. Add GEMINI_API_KEY to your .env file.' });
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return res.status(503).json({ error: 'GEMINI_API_KEY is not set. Add it to your .env file.' });
   }
   try {
     const { currentPlaces, destination } = req.body;
@@ -43,7 +36,12 @@ Return ONLY a valid JSON array with no markdown or extra text. Each item must ha
 - "category": one of Food, Fashion, Coffee, Spa, Sightseeing, Nightlife (string)
 - "address": full street address (string)`;
 
-    const response = await getAI().models.generateContent({
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+    });
+
+    const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: prompt,
       config: { responseMimeType: "application/json" },
@@ -53,19 +51,20 @@ Return ONLY a valid JSON array with no markdown or extra text. Each item must ha
     const suggestions = JSON.parse(text);
     res.json(Array.isArray(suggestions) ? suggestions : []);
   } catch (error: any) {
-    console.error("Error generating suggestions:", error);
     const msg = error?.message || 'Unknown error';
-    const friendly = msg.includes('API_KEY') || msg.includes('401')
-      ? 'Invalid Gemini API key. Check your GEMINI_API_KEY in .env.'
+    console.error("Gemini error:", msg);
+    const friendly = msg.includes('API_KEY') || msg.includes('401') || msg.includes('403')
+      ? 'Invalid or missing Gemini API key.'
       : msg.includes('quota') || msg.includes('429')
-      ? 'Gemini API quota exceeded. Try again later.'
-      : 'Generation failed. Please try again.';
+      ? 'Gemini quota exceeded. Try again later.'
+      : msg.includes('404') || msg.includes('no longer available')
+      ? 'Gemini model not found. Contact support.'
+      : `Generation failed: ${msg}`;
     res.status(500).json({ error: friendly });
   }
 });
 
 async function startServer() {
-  // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -81,7 +80,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on http://localhost:${PORT} — Gemini model: gemini-2.5-flash`);
   });
 }
 

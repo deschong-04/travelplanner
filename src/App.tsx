@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { Plus, Trash2, ChevronRight, ArrowRightLeft, DollarSign, MapPin, Tag, Calendar, ChevronDown, ChevronUp, Clock, X, GripVertical, Search, Map as MapIcon, ExternalLink, Compass, Navigation, Car, MoveHorizontal as MoreHorizontal, Copy, Check, Users, CreditCard as Edit2, ArrowRight, ArrowLeft, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { APIProvider, useMapsLibrary, Map, AdvancedMarker, Pin, InfoWindow, useMap } from '@vis.gl/react-google-maps';
+import { APIProvider, useMapsLibrary, Map as GoogleMap, AdvancedMarker, Pin, InfoWindow, useMap } from '@vis.gl/react-google-maps';
 import {
   DndContext,
   closestCenter,
@@ -259,7 +259,7 @@ function RealGoogleMap({
 
   return (
     <div className="w-full h-[450px] rounded-2xl overflow-hidden border border-slate-200 relative shadow-sm">
-      <Map
+      <GoogleMap
         defaultCenter={initialCenter}
         defaultZoom={14}
         mapId="saigon_planner_map_id"
@@ -308,7 +308,7 @@ function RealGoogleMap({
             </React.Fragment>
           );
         })}
-      </Map>
+      </GoogleMap>
     </div>
   );
 }
