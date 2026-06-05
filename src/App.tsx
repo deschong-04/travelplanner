@@ -1665,6 +1665,7 @@ export default function App() {
   // AI Suggestions State
   const [suggestedPlaces, setSuggestedPlaces] = useState<Omit<Place, 'id'>[]>(RECOMMENDED_PLACES);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   const visibleSuggestions = useMemo(() => {
     const databaseNames = new Set(places.map(p => p.name.toLowerCase().replace(/\s+/g, ' ').trim()));
@@ -1673,24 +1674,32 @@ export default function App() {
 
   const fetchMoreSuggestions = useCallback(async () => {
     setIsGenerating(true);
+    setGenerateError(null);
     try {
       const response = await fetch('/api/suggestions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ currentPlaces: places, destination: destinationLabel }),
       });
-      
-      if (!response.ok) throw new Error('Generation failed');
-      
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || 'Generation failed');
+      }
+
       const newSuggestions = await response.json();
+      if (!Array.isArray(newSuggestions) || newSuggestions.length === 0) {
+        setGenerateError('No suggestions returned. Try again.');
+        return;
+      }
       setSuggestedPlaces(prev => {
-        // Filter out duplicates based on name
         const existingNames = new Set(prev.map(p => p.name));
         const filtered = newSuggestions.filter((p: any) => !existingNames.has(p.name));
         return [...filtered, ...prev];
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to generate suggestions:', error);
+      setGenerateError(error.message || 'Something went wrong. Please try again.');
     } finally {
       setIsGenerating(false);
     }
@@ -2777,9 +2786,14 @@ export default function App() {
                                       </>
                                     )}
                                   </button>
-                                  {visibleSuggestions.length === 0 && !isGenerating && (
+                                  {generateError && (
+                                    <div className="sm:col-span-2 text-center py-3">
+                                      <div className="text-red-500 text-xs font-medium">{generateError}</div>
+                                    </div>
+                                  )}
+                                  {visibleSuggestions.length === 0 && !isGenerating && !generateError && (
                                     <div className="sm:col-span-2 text-center py-8">
-                                      <div className="text-slate-400 text-xs italic">No new suggestions available. Try generating more!</div>
+                                      <div className="text-slate-400 text-xs italic">No suggestions yet. Click Generate to get AI recommendations!</div>
                                     </div>
                                   )}
                                   {visibleSuggestions.map((rec, i) => (

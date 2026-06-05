@@ -35,7 +35,7 @@ app.post("/api/suggestions", async (req, res) => {
     Ensure districts or areas correspond to real, popular neighborhoods in ${dest}.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-2.0-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
