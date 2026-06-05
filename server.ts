@@ -44,7 +44,7 @@ Return ONLY a valid JSON array with no markdown or extra text. Each item must ha
 - "address": full street address (string)`;
 
     const response = await getAI().models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       contents: prompt,
       config: { responseMimeType: "application/json" },
     });
