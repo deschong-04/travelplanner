@@ -1292,6 +1292,9 @@ export default function App() {
   const [targetCur, setTargetCur] = useState('VND');
   const [convRate, setConvRate] = useState<number>(18500);
   const [convRateInput, setConvRateInput] = useState<string>('18500');
+  const [rateIsManual, setRateIsManual] = useState(false);
+  const [rateFetchStatus, setRateFetchStatus] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle');
+
   // Hashing helper for guest sessions
   const getEmailHash = (email: string): string => {
     const clean = email.toLowerCase().trim();
@@ -1595,6 +1598,30 @@ export default function App() {
   });
 
   const DAYS = useMemo(() => getDayList(arrivalDate, departureDate), [arrivalDate, departureDate]);
+
+  // Auto-fetch live exchange rate when currencies change (unless the user has manually overridden)
+  useEffect(() => {
+    if (rateIsManual) return;
+    if (baseCur.length !== 3 || targetCur.length !== 3) return;
+    const controller = new AbortController();
+    setRateFetchStatus('loading');
+    fetch(`https://open.er-api.com/v6/latest/${baseCur}`, { signal: controller.signal })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.result === 'success' && data.rates?.[targetCur]) {
+          const rate = data.rates[targetCur];
+          setConvRate(rate);
+          setConvRateInput(String(rate));
+          setRateFetchStatus('ok');
+        } else {
+          setRateFetchStatus('error');
+        }
+      })
+      .catch((err) => {
+        if (err.name !== 'AbortError') setRateFetchStatus('error');
+      });
+    return () => controller.abort();
+  }, [baseCur, targetCur, rateIsManual]);
 
   // Track whether we've done the initial tab selection so editing dates doesn't jump the view
   const didInitTab = useRef(false);
@@ -3118,7 +3145,7 @@ export default function App() {
             <div className="section-card p-6 gap-4 flex flex-col shadow-lg shadow-slate-200/50">
               <div>
                 <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest mb-1">Currency Converter</h2>
-                <p className="text-[10px] text-slate-400 font-bold uppercase">Configure rate below:</p>
+                <p className="text-[10px] text-slate-400 font-bold uppercase">Live rate · override below</p>
               </div>
 
               {/* Dynamic Rate Configurator */}
@@ -3126,27 +3153,53 @@ export default function App() {
                 <div className="flex gap-2 items-center">
                   <div className="flex-1 space-y-0.5">
                     <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider">From</span>
-                    <input 
-                      type="text" 
-                      value={baseCur} 
-                      onChange={(e) => setBaseCur(e.target.value.toUpperCase().slice(0, 3))}
+                    <input
+                      type="text"
+                      value={baseCur}
+                      onChange={(e) => { setBaseCur(e.target.value.toUpperCase().slice(0, 3)); setRateIsManual(false); }}
                       className="w-full text-center text-xs font-bold p-1 bg-white border border-slate-200 rounded outline-none focus:border-indigo-500"
                       maxLength={3}
                     />
                   </div>
                   <div className="flex-1 space-y-0.5">
                     <span className="text-[9px] font-extrabold text-[#10B981] uppercase tracking-wider">To</span>
-                    <input 
-                      type="text" 
-                      value={targetCur} 
-                      onChange={(e) => setTargetCur(e.target.value.toUpperCase().slice(0, 3))}
+                    <input
+                      type="text"
+                      value={targetCur}
+                      onChange={(e) => { setTargetCur(e.target.value.toUpperCase().slice(0, 3)); setRateIsManual(false); }}
                       className="w-full text-center text-xs font-bold p-1 bg-white border border-slate-200 rounded outline-none focus:border-emerald-500"
                       maxLength={3}
                     />
                   </div>
                 </div>
                 <div className="space-y-0.5">
-                  <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider block">Factor (1 {baseCur} = To {targetCur})</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider">
+                      Factor (1 {baseCur} = {targetCur})
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {rateFetchStatus === 'loading' && (
+                        <span className="text-[8px] font-bold text-slate-400 flex items-center gap-0.5">
+                          <span className="inline-block w-2 h-2 border border-slate-400 border-t-transparent rounded-full animate-spin" />
+                          Fetching...
+                        </span>
+                      )}
+                      {rateFetchStatus === 'ok' && !rateIsManual && (
+                        <span className="text-[8px] font-bold text-emerald-600">Live rate</span>
+                      )}
+                      {rateFetchStatus === 'error' && !rateIsManual && (
+                        <span className="text-[8px] font-bold text-red-400">Fetch failed</span>
+                      )}
+                      {rateIsManual && (
+                        <button
+                          onClick={() => setRateIsManual(false)}
+                          className="text-[8px] font-bold text-indigo-500 underline underline-offset-1"
+                        >
+                          Reset to live
+                        </button>
+                      )}
+                    </div>
+                  </div>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -3155,7 +3208,10 @@ export default function App() {
                       const raw = e.target.value;
                       setConvRateInput(raw);
                       const parsed = parseFloat(raw);
-                      if (!isNaN(parsed) && parsed > 0) setConvRate(parsed);
+                      if (!isNaN(parsed) && parsed > 0) {
+                        setConvRate(parsed);
+                        setRateIsManual(true);
+                      }
                     }}
                     onBlur={() => {
                       const parsed = parseFloat(convRateInput);
@@ -3166,7 +3222,7 @@ export default function App() {
                         setConvRateInput(String(parsed));
                       }
                     }}
-                    className="w-full text-center text-xs font-bold p-1 bg-white border border-slate-200 rounded outline-none focus:border-indigo-500"
+                    className={`w-full text-center text-xs font-bold p-1 bg-white border rounded outline-none focus:border-indigo-500 ${rateIsManual ? 'border-amber-300' : 'border-slate-200'}`}
                   />
                 </div>
               </div>
