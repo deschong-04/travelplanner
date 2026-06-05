@@ -1677,7 +1677,7 @@ export default function App() {
       const response = await fetch('/api/suggestions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currentPlaces: places }),
+        body: JSON.stringify({ currentPlaces: places, destination: destinationLabel }),
       });
       
       if (!response.ok) throw new Error('Generation failed');
@@ -1694,7 +1694,12 @@ export default function App() {
     } finally {
       setIsGenerating(false);
     }
-  }, [places]);
+  }, [places, destinationLabel]);
+
+  // Clear stale suggestions whenever the destination changes
+  useEffect(() => {
+    setSuggestedPlaces([]);
+  }, [destinationLabel]);
 
   // Currency State
   const [baseInput, setBaseInput] = useState<string>('50');
