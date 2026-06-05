@@ -47,8 +47,9 @@ Return ONLY a valid JSON array with no markdown or extra text. Each item must ha
       config: { responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 0 } },
     });
 
-    const text = response.text?.trim() || "[]";
-    const suggestions = JSON.parse(text);
+    const raw = response.text?.trim() || "[]";
+    const match = raw.match(/\[[\s\S]*\]/);
+    const suggestions = JSON.parse(match ? match[0] : "[]");
     res.json(Array.isArray(suggestions) ? suggestions : []);
   } catch (error: any) {
     const msg = error?.message || 'Unknown error';
