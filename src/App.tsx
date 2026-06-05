@@ -1406,15 +1406,20 @@ export default function App() {
     channel
       .on('presence', { event: 'sync' }, () => {
         const state = channel.presenceState();
-        const list: any[] = [];
         const now = Date.now();
+        // Each key may have multiple entries (one per connection). Keep only the
+        // most-recent entry per key so the same user on multiple devices shows once.
+        const seen = new Map<string, any>();
         Object.values(state).flat().forEach((user: any) => {
           const activeTime = new Date(user.activeAt || Date.now()).getTime();
           if (now - activeTime < 180000) {
-            list.push(user);
+            const existing = seen.get(user.id);
+            if (!existing || activeTime > new Date(existing.activeAt || 0).getTime()) {
+              seen.set(user.id, user);
+            }
           }
         });
-        setCollaborators(list);
+        setCollaborators(Array.from(seen.values()));
       });
 
     channel.subscribe(async (status) => {
