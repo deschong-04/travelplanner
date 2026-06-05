@@ -36,10 +36,7 @@ Return ONLY a valid JSON array with no markdown or extra text. Each item must ha
 - "category": one of Food, Fashion, Coffee, Spa, Sightseeing, Nightlife (string)
 - "address": full street address (string)`;
 
-    const ai = new GoogleGenAI({
-      apiKey,
-      httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
-    });
+    const ai = new GoogleGenAI({ apiKey });
 
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
