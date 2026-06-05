@@ -1291,7 +1291,7 @@ export default function App() {
   const [baseCur, setBaseCur] = useState('SGD');
   const [targetCur, setTargetCur] = useState('VND');
   const [convRate, setConvRate] = useState<number>(18500);
-
+  const [convRateInput, setConvRateInput] = useState<string>('18500');
   // Hashing helper for guest sessions
   const getEmailHash = (email: string): string => {
     const clean = email.toLowerCase().trim();
@@ -1752,7 +1752,7 @@ export default function App() {
           
           if (data.baseCurrency !== undefined && data.baseCurrency !== null) setBaseCur(data.baseCurrency);
           if (data.targetCurrency !== undefined && data.targetCurrency !== null) setTargetCur(data.targetCurrency);
-          if (data.conversionRate !== undefined && data.conversionRate !== null) setConvRate(data.conversionRate);
+          if (data.conversionRate !== undefined && data.conversionRate !== null) { setConvRate(data.conversionRate); setConvRateInput(String(data.conversionRate)); }
 
           // Auto-claim anonymous guest trips for the logged-in user
           if (currentUser && (!data.ownerId || data.ownerId === 'guest')) {
@@ -1798,7 +1798,7 @@ export default function App() {
             
             if (data.baseCurrency !== undefined && data.baseCurrency !== null) setBaseCur(data.baseCurrency);
             if (data.targetCurrency !== undefined && data.targetCurrency !== null) setTargetCur(data.targetCurrency);
-            if (data.conversionRate !== undefined && data.conversionRate !== null) setConvRate(data.conversionRate);
+            if (data.conversionRate !== undefined && data.conversionRate !== null) { setConvRate(data.conversionRate); setConvRateInput(String(data.conversionRate)); }
           }
         }
       )
@@ -3148,21 +3148,25 @@ export default function App() {
                 <div className="space-y-0.5">
                   <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider block">Factor (1 {baseCur} = To {targetCur})</span>
                   <input
-                    type="number"
-                    value={convRate}
+                    type="text"
+                    inputMode="decimal"
+                    value={convRateInput}
                     onChange={(e) => {
                       const raw = e.target.value;
+                      setConvRateInput(raw);
                       const parsed = parseFloat(raw);
-                      if (raw === '' || raw === '-') return;
                       if (!isNaN(parsed) && parsed > 0) setConvRate(parsed);
                     }}
-                    onBlur={(e) => {
-                      const parsed = parseFloat(e.target.value);
-                      if (isNaN(parsed) || parsed <= 0) setConvRate(1);
+                    onBlur={() => {
+                      const parsed = parseFloat(convRateInput);
+                      if (isNaN(parsed) || parsed <= 0) {
+                        setConvRate(1);
+                        setConvRateInput('1');
+                      } else {
+                        setConvRateInput(String(parsed));
+                      }
                     }}
                     className="w-full text-center text-xs font-bold p-1 bg-white border border-slate-200 rounded outline-none focus:border-indigo-500"
-                    step="any"
-                    min="0.000001"
                   />
                 </div>
               </div>
