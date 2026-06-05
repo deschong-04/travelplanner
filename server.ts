@@ -44,7 +44,7 @@ Return ONLY a valid JSON array with no markdown or extra text. Each item must ha
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: prompt,
-      config: { responseMimeType: "application/json" },
+      config: { responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 0 } },
     });
 
     const text = response.text?.trim() || "[]";
