@@ -1378,10 +1378,14 @@ export default function App() {
   useEffect(() => {
     if (!tripId || !isSupabaseConfigured) return;
 
+    // Use the authenticated user's UID so all their devices map to one presence slot.
+    // Fall back to the stable clientId for unauthenticated guests.
+    const presenceKey = currentUser?.uid || clientId;
+
     const channel = supabase.channel(`presence:${tripId}`, {
       config: {
         presence: {
-          key: clientId,
+          key: presenceKey,
         },
       },
     });
@@ -1389,7 +1393,7 @@ export default function App() {
     const updatePresence = async () => {
       try {
         await channel.track({
-          id: clientId,
+          id: presenceKey,
           name: activeDisplayName,
           avatar: activePhotoURL || '',
           activeAt: new Date().toISOString()
@@ -1406,7 +1410,7 @@ export default function App() {
         const now = Date.now();
         Object.values(state).flat().forEach((user: any) => {
           const activeTime = new Date(user.activeAt || Date.now()).getTime();
-          if (now - activeTime < 180000) { // active within last 3 minutes
+          if (now - activeTime < 180000) {
             list.push(user);
           }
         });
@@ -1425,7 +1429,7 @@ export default function App() {
       clearInterval(heartbeat);
       channel.unsubscribe();
     };
-  }, [tripId, activeDisplayName, activePhotoURL, clientId]);
+  }, [tripId, activeDisplayName, activePhotoURL, clientId, currentUser]);
 
 
   // Authenticate user changes
@@ -2437,13 +2441,13 @@ export default function App() {
                     <div className="flex flex-wrap items-center gap-1.5">
                       {collaborators.map((collab) => {
                         const init = collab.name ? collab.name.charAt(0).toUpperCase() : '?';
-                        const isMe = collab.id === clientId;
+                        const isMe = collab.id === (currentUser?.uid || clientId);
                         return (
                           <div
                             key={collab.id}
                             className={`w-7 h-7 rounded-full border-2 ${isMe ? 'border-indigo-500 ring-2 ring-indigo-100' : 'border-white'} flex items-center justify-center text-[10px] font-bold text-white shrink-0 relative group cursor-help`}
                             style={{ 
-                              backgroundColor: collab.id === clientId ? '#4F46E5' : `hsl(${(collab.id.charCodeAt(0) * 40) % 360}, 65%, 50%)`
+                              backgroundColor: collab.id === (currentUser?.uid || clientId) ? '#4F46E5' : `hsl(${(collab.id.charCodeAt(0) * 40) % 360}, 65%, 50%)`
                             }}
                           >
                             {collab.avatar ? (
