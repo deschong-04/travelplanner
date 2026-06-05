@@ -1343,7 +1343,15 @@ export default function App() {
   const [joiningCode, setJoiningCode] = useState('');
   const [copySuccess, setCopySuccess] = useState(false);
 
-  const clientId = useRef(Math.random().toString(36).substr(2, 9)).current;
+  const clientId = useRef((() => {
+    const key = 'atlas_client_id';
+    let id = sessionStorage.getItem(key);
+    if (!id) {
+      id = Math.random().toString(36).substr(2, 9);
+      sessionStorage.setItem(key, id);
+    }
+    return id;
+  })()).current;
 
   const activeDisplayName = currentUser ? (currentUser.displayName || currentUser.email || 'Explorer') : guestName;
   const activePhotoURL = currentUser ? currentUser.photoURL : null;
@@ -1411,27 +1419,14 @@ export default function App() {
       }
     });
 
+    const heartbeat = setInterval(() => updatePresence(), 30000);
+
     return () => {
+      clearInterval(heartbeat);
       channel.unsubscribe();
     };
   }, [tripId, activeDisplayName, activePhotoURL, clientId]);
 
-  // Periodic visual presence heartbeat update
-  useEffect(() => {
-    if (!tripId || !isSupabaseConfigured) return;
-    const interval = setInterval(async () => {
-      try {
-        const channel = supabase.channel(`presence:${tripId}`);
-        await channel.track({
-          id: clientId,
-          name: activeDisplayName,
-          avatar: activePhotoURL || '',
-          activeAt: new Date().toISOString()
-        });
-      } catch (err) {}
-    }, 20000);
-    return () => clearInterval(interval);
-  }, [tripId, activeDisplayName, activePhotoURL, clientId]);
 
   // Authenticate user changes
   useEffect(() => {
