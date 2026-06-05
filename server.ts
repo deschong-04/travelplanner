@@ -11,17 +11,17 @@ const PORT = 3000;
 
 app.use(express.json());
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    }
-  }
-});
+function getAI() {
+  dotenv.config({ override: true });
+  return new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY,
+    httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+  });
+}
 
 // API route for generating suggestions
 app.post("/api/suggestions", async (req, res) => {
+  dotenv.config({ override: true });
   if (!process.env.GEMINI_API_KEY) {
     return res.status(503).json({ error: 'Gemini API key is not configured. Add GEMINI_API_KEY to your .env file.' });
   }
@@ -43,7 +43,7 @@ Return ONLY a valid JSON array with no markdown or extra text. Each item must ha
 - "category": one of Food, Fashion, Coffee, Spa, Sightseeing, Nightlife (string)
 - "address": full street address (string)`;
 
-    const response = await ai.models.generateContent({
+    const response = await getAI().models.generateContent({
       model: "gemini-2.0-flash",
       contents: prompt,
       config: { responseMimeType: "application/json" },
