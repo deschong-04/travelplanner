@@ -1676,50 +1676,23 @@ export default function App() {
     setIsGenerating(true);
     setGenerateError(null);
     try {
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-      if (!apiKey) throw new Error('VITE_GEMINI_API_KEY is not set.');
-
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
       const dest = destinationLabel || 'Ho Chi Minh City (Saigon), Vietnam';
-      const prompt = `You are an expert travel guide for ${dest}.
-Based on the following existing places in the user's travel master planner, generate exactly 10 more unique and highly recommended places to visit in ${dest}.
 
-Existing places: ${JSON.stringify(places)}
+      const res = await fetch(`${supabaseUrl}/functions/v1/suggestions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabaseKey}`,
+        },
+        body: JSON.stringify({ currentPlaces: places, destination: dest }),
+      });
 
-Include a mix of hidden gems, popular spots, and varied categories like: Food, Fashion, Coffee, Spa, Sightseeing, and Nightlife.
-Each district/area must be a real, popular neighbourhood in ${dest}.
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error || 'Generation failed');
 
-Return ONLY a valid JSON array with no markdown or extra text. Each item must have these exact keys:
-- "name": place name (string)
-- "district": neighbourhood or area name (string)
-- "category": one of Food, Fashion, Coffee, Spa, Sightseeing, Nightlife (string)
-- "address": full street address (string)`;
-
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              responseMimeType: 'application/json',
-              thinkingConfig: { thinkingBudget: 0 },
-            },
-          }),
-        }
-      );
-
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => ({}));
-        const msg = errBody?.error?.message || res.statusText;
-        throw new Error(msg.includes('quota') || res.status === 429 ? 'Gemini quota exceeded. Try again later.' : `Generation failed: ${msg}`);
-      }
-
-      const data = await res.json();
-      const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '[]';
-      const match = raw.match(/\[[\s\S]*\]/);
-      const newSuggestions = JSON.parse(match ? match[0] : '[]');
-
+      const newSuggestions = body;
       if (!Array.isArray(newSuggestions) || newSuggestions.length === 0) {
         setGenerateError('No suggestions returned. Try again.');
         return;
