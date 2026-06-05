@@ -3147,12 +3147,22 @@ export default function App() {
                 </div>
                 <div className="space-y-0.5">
                   <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider block">Factor (1 {baseCur} = To {targetCur})</span>
-                  <input 
-                    type="number" 
-                    value={convRate} 
-                    onChange={(e) => setConvRate(parseFloat(e.target.value) || 1)}
+                  <input
+                    type="number"
+                    value={convRate}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      const parsed = parseFloat(raw);
+                      if (raw === '' || raw === '-') return;
+                      if (!isNaN(parsed) && parsed > 0) setConvRate(parsed);
+                    }}
+                    onBlur={(e) => {
+                      const parsed = parseFloat(e.target.value);
+                      if (isNaN(parsed) || parsed <= 0) setConvRate(1);
+                    }}
                     className="w-full text-center text-xs font-bold p-1 bg-white border border-slate-200 rounded outline-none focus:border-indigo-500"
                     step="any"
+                    min="0.000001"
                   />
                 </div>
               </div>
