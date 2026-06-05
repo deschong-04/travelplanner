@@ -1403,28 +1403,32 @@ export default function App() {
       }
     };
 
-    channel
-      .on('presence', { event: 'sync' }, () => {
-        const state = channel.presenceState();
-        const now = Date.now();
-        // Deduplicate by userId so the same account on multiple devices shows once.
-        const seen = new Map<string, any>();
-        Object.values(state).flat().forEach((entry: any) => {
-          const activeTime = new Date(entry.activeAt || Date.now()).getTime();
-          if (now - activeTime < 180000) {
-            const dedupeKey = entry.userId || entry.id;
-            const existing = seen.get(dedupeKey);
-            if (!existing || activeTime > new Date(existing.activeAt || 0).getTime()) {
-              seen.set(dedupeKey, entry);
-            }
+    const syncCollaborators = () => {
+      const state = channel.presenceState();
+      const now = Date.now();
+      const seen = new Map<string, any>();
+      Object.values(state).flat().forEach((entry: any) => {
+        const activeTime = new Date(entry.activeAt || Date.now()).getTime();
+        if (now - activeTime < 180000) {
+          const dedupeKey = entry.userId || entry.id;
+          const existing = seen.get(dedupeKey);
+          if (!existing || activeTime > new Date(existing.activeAt || 0).getTime()) {
+            seen.set(dedupeKey, entry);
           }
-        });
-        setCollaborators(Array.from(seen.values()));
+        }
       });
+      setCollaborators(Array.from(seen.values()));
+    };
+
+    channel
+      .on('presence', { event: 'sync' }, syncCollaborators)
+      .on('presence', { event: 'join' }, syncCollaborators)
+      .on('presence', { event: 'leave' }, syncCollaborators);
 
     channel.subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
         await updatePresence();
+        syncCollaborators();
       }
     });
 
@@ -1570,13 +1574,17 @@ export default function App() {
   });
 
   const [arrivalDate, setArrivalDate] = useState(() => {
-    const saved = localStorage.getItem('saigon_trip_info');
+    const params = new URLSearchParams(window.location.search);
+    const tid = params.get('tripId') || params.get('trip') || localStorage.getItem('saigon_trip_id') || '';
+    const saved = localStorage.getItem(`trip_info_${tid}`);
     if (saved) return JSON.parse(saved).arrivalDate || new Date().toISOString().split('T')[0];
     return new Date().toISOString().split('T')[0];
   });
 
   const [departureDate, setDepartureDate] = useState(() => {
-    const saved = localStorage.getItem('saigon_trip_info');
+    const params = new URLSearchParams(window.location.search);
+    const tid = params.get('tripId') || params.get('trip') || localStorage.getItem('saigon_trip_id') || '';
+    const saved = localStorage.getItem(`trip_info_${tid}`);
     if (saved) {
       const info = JSON.parse(saved);
       if (info.departureDate) return info.departureDate;
@@ -1683,8 +1691,11 @@ export default function App() {
   }, [places]);
 
   useEffect(() => {
+    if (tripId) {
+      localStorage.setItem(`trip_info_${tripId}`, JSON.stringify({ plannerName, arrivalDate, departureDate }));
+    }
     localStorage.setItem('saigon_trip_info', JSON.stringify({ plannerName, arrivalDate, departureDate }));
-  }, [plannerName, arrivalDate, departureDate]);
+  }, [plannerName, arrivalDate, departureDate, tripId]);
 
   // Cloud Sync: Subscribe to Trip Metadata on Supabase
   useEffect(() => {
@@ -1725,8 +1736,8 @@ export default function App() {
           }
         } else if (data) {
           setPlannerName((prev: string) => prev !== data.plannerName ? (data.plannerName || '') : prev);
-          setArrivalDate((prev: string) => prev !== data.arrivalDate ? (data.arrivalDate || '') : prev);
-          setDepartureDate((prev: string) => prev !== data.departureDate ? (data.departureDate || '') : prev);
+          if (data.arrivalDate) setArrivalDate(data.arrivalDate);
+          if (data.departureDate) setDepartureDate(data.departureDate);
           setDestinationLabel((prev: string) => prev !== data.destination ? (data.destination || 'Saigon') : prev);
           setIsShared(!!data.isShared);
           
@@ -1771,8 +1782,8 @@ export default function App() {
           if (payload.new) {
             const data = payload.new as any;
             setPlannerName((prev: string) => prev !== data.plannerName ? (data.plannerName || '') : prev);
-            setArrivalDate((prev: string) => prev !== data.arrivalDate ? (data.arrivalDate || '') : prev);
-            setDepartureDate((prev: string) => prev !== data.departureDate ? (data.departureDate || '') : prev);
+            if (data.arrivalDate) setArrivalDate(data.arrivalDate);
+            if (data.departureDate) setDepartureDate(data.departureDate);
             setDestinationLabel((prev: string) => prev !== data.destination ? (data.destination || 'Saigon') : prev);
             setIsShared(!!data.isShared);
             
